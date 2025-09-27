@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 mod untweaked_key;
+mod tweaked_key;
 
 use p2c_s2c::secp256k1::XOnlyPublicKey;
 use tiny_http::{Header, Response, StatusCode};
@@ -8,6 +9,7 @@ use tiny_http::{Header, Response, StatusCode};
 use std::io::Cursor;
 
 pub use untweaked_key::UntweakedKeyEndpoint;
+pub use tweaked_key::TweakedKeyEndpoint;
 
 /// An endpoint that the server will listen for.
 ///

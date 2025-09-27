@@ -7,14 +7,11 @@ mod hashes;
 use std::{env, fs};
 
 use anyhow::Context as _;
-use p2c_s2c::secp256k1::{Keypair, Secp256k1, XOnlyPublicKey};
-use p2c_s2c::TweakedKey;
+use p2c_s2c::secp256k1::{Keypair, Secp256k1};
 use simplicity::Cmr;
-use simplicity::jet;
 use tiny_http::Server;
 
-use crate::endpoints::{UntweakedKeyEndpoint, Endpoint};
-use crate::hashes::SimplicityUnchainedHash;
+use crate::endpoints::{UntweakedKeyEndpoint, TweakedKeyEndpoint, Endpoint};
 
 fn handle_error(_: &str, _: std::io::Error) {
     // FIXME do something
@@ -71,58 +68,9 @@ fn main() -> Result<(), anyhow::Error> {
         }
 
         handle_endpoint!(UntweakedKeyEndpoint);
+        handle_endpoint!(TweakedKeyEndpoint);
 
         let response = match url.as_str() {
-            "/simplicity-unchained/tweaked-key" => {
-                #[derive(serde::Deserialize)]
-                struct Request {
-                    simplicity_base64: String,
-                    #[serde(default)]
-                    cmr: Option<Cmr>,
-                }
-               
-                let read = request.as_reader();
-                match serde_json::from_reader::<_, Request>(read) {
-                    Ok(req) => match simplicity::CommitNode::<jet::Elements>::from_str(&req.simplicity_base64) {
-                        Ok(prog) => {
-                            let cmr = prog.cmr();
-                            if req.cmr.is_some() && req.cmr != Some(cmr) {
-                                #[derive(serde::Serialize)]
-                                struct CmrMismatch {
-                                    program_cmr: Cmr,
-                                    provided_cmr: Cmr,
-                                }
-                                endpoints::json_response(&CmrMismatch {
-                                    program_cmr: cmr,
-                                    provided_cmr: req.cmr.unwrap(),
-                                }, 400)
-                            } else {
-                                #[derive(serde::Serialize)]
-                                struct TweakInfo {
-                                    program_cmr: Cmr,
-                                    tweaked_key: TweakedKey<XOnlyPublicKey, SimplicityUnchainedHash>,
-                                }
-
-                                let tweaked_key = TweakedKey::new(&pk, cmr.as_ref());
-
-                                endpoints::json_response(&TweakInfo {
-                                    program_cmr: cmr,
-                                    tweaked_key,
-                                }, 400)
-                            }
-                        }
-                        Err(e) => {
-                            // FIXME: provide more specific error; attempt to parse as bitcoin maybe
-                            endpoints::json_response(&e.to_string(), 400)
-                        },
-
-                    },
-                    Err(e) => {
-                        endpoints::json_response(&e.to_string(), 400)
-                    },
-                }
-               
-            },
             "/simplicity-unchained/sign-elements" => {
                 #[derive(serde::Deserialize)]
                 struct Request {
