@@ -1,8 +1,36 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
+mod untweaked_key;
+
+use p2c_s2c::secp256k1::XOnlyPublicKey;
 use tiny_http::{Header, Response, StatusCode};
 
 use std::io::Cursor;
+
+pub use untweaked_key::UntweakedKeyEndpoint;
+
+/// An endpoint that the server will listen for.
+///
+/// Every implementor of this trait needs to be manually added to the match
+/// in main.rs.
+pub trait Endpoint {
+    /// The URL of the endpoint, starting with `/simplicity-unchained/`.
+    const URL: &'static str;
+
+    /// The type of the requested data.
+    type RequestData: for<'de> serde::Deserialize<'de>;
+
+    /// The type of the response.
+    type ResponseData: serde::Serialize;
+
+    /// The type of the response in case of error.
+    type ResponseError: serde::Serialize;
+
+    fn handle(
+        untweaked_key: &XOnlyPublicKey,
+        data: Self::RequestData,
+    ) -> Result<Self::ResponseData, Self::ResponseError>;
+}
 
 /// Produces a 404 response that contains the endpoint in its json blob.
 pub fn response_404(url: &str) -> Response<Cursor<Vec<u8>>> {

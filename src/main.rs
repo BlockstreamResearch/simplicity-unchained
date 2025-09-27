@@ -13,6 +13,7 @@ use simplicity::Cmr;
 use simplicity::jet;
 use tiny_http::Server;
 
+use crate::endpoints::{UntweakedKeyEndpoint, Endpoint};
 use crate::hashes::SimplicityUnchainedHash;
 
 fn handle_error(_: &str, _: std::io::Error) {
@@ -40,13 +41,39 @@ fn main() -> Result<(), anyhow::Error> {
 
     let kp = Keypair::from_secret_key(&secp, &config.untweaked_secret_key);
     let (pk, _parity) = kp.x_only_public_key();
-    let hex_pk = pk.to_string();
 
     for mut request in server.incoming_requests() {
         let url = request.url().to_owned();
+
+        macro_rules! handle_endpoint {
+            ($endpoint_ty:ty) => {
+                if url == <$endpoint_ty>::URL {
+                    let read = request.as_reader();
+                    let response = match serde_json::from_reader::<_, <$endpoint_ty as Endpoint>::RequestData>(read) {
+                        Ok(data) => match <$endpoint_ty>::handle(&pk, data) {
+                            Ok(resp) => endpoints::json_response(&resp, 200),
+                            Err(e) => endpoints::json_response(&e, 400),
+                        },
+                        Err(e) => {
+                            endpoints::json_response(&e.to_string(), 400)
+                        },
+                    };
+
+                    if let Err(e) = request.respond(response) {
+                        handle_error(&format!("responding to {}", url), e);
+                    }
+
+                    // Ideally we would make each instance here a match clause, or at
+                    // least an if-else, but we cannot because Rust macros are garbage.
+                    continue;
+                }
+            }
+        }
+
+        handle_endpoint!(UntweakedKeyEndpoint);
+
         let response = match url.as_str() {
-            "/simplicity-unchained/untweaked-key" => endpoints::json_response(&hex_pk, 200),
-            "/simplicity-unchained/generate-address" => {
+            "/simplicity-unchained/tweaked-key" => {
                 #[derive(serde::Deserialize)]
                 struct Request {
                     simplicity_base64: String,
