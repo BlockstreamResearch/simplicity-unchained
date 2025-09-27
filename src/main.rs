@@ -43,13 +43,9 @@ fn main() -> Result<(), anyhow::Error> {
     let hex_pk = pk.to_string();
 
     for mut request in server.incoming_requests() {
-        match request.url() {
-            "/simplicity-unchained/untweaked-key" => {
-                let response = endpoints::json_response(&hex_pk, 200);
-                if let Err(e) = request.respond(response) {
-                    handle_error("responding to untweaked-key", e);
-                }
-            },
+        let url = request.url().to_owned();
+        let response = match url.as_str() {
+            "/simplicity-unchained/untweaked-key" => endpoints::json_response(&hex_pk, 200),
             "/simplicity-unchained/generate-address" => {
                 #[derive(serde::Deserialize)]
                 struct Request {
@@ -57,10 +53,9 @@ fn main() -> Result<(), anyhow::Error> {
                     #[serde(default)]
                     cmr: Option<Cmr>,
                 }
-
                
                 let read = request.as_reader();
-                let response = match serde_json::from_reader::<_, Request>(read) {
+                match serde_json::from_reader::<_, Request>(read) {
                     Ok(req) => match simplicity::CommitNode::<jet::Elements>::from_str(&req.simplicity_base64) {
                         Ok(prog) => {
                             let cmr = prog.cmr();
@@ -98,18 +93,25 @@ fn main() -> Result<(), anyhow::Error> {
                     Err(e) => {
                         endpoints::json_response(&e.to_string(), 400)
                     },
-                };
-                
-                if let Err(e) = request.respond(response) {
-                    handle_error("responding to generate-address", e);
                 }
+               
             },
-            x => {
-                let response = endpoints::response_404(x);
-                if let Err(e) = request.respond(response) {
-                    handle_error("responding with 404", e);
+            "/simplicity-unchained/sign-elements" => {
+                #[derive(serde::Deserialize)]
+                struct Request {
+                    simplicity_base64: String,
+                    witness_hex: String,
+                    #[serde(default)]
+                    cmr: Option<Cmr>,
                 }
-            }
+
+                todo!()
+            },
+            x => endpoints::response_404(x),
+        };
+
+        if let Err(e) = request.respond(response) {
+            handle_error(&format!("responding to {}", url), e);
         }
     }
 
