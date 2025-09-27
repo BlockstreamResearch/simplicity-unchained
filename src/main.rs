@@ -36,7 +36,6 @@ fn main() -> Result<(), anyhow::Error> {
     let secp = Secp256k1::new();
 
     let kp = Keypair::from_secret_key(&secp, &config.untweaked_secret_key);
-    let (pk, _parity) = kp.x_only_public_key();
 
     for mut request in server.incoming_requests() {
         let url = request.url().to_owned();
@@ -46,7 +45,7 @@ fn main() -> Result<(), anyhow::Error> {
                 if url == <$endpoint_ty>::URL {
                     let read = request.as_reader();
                     let response = match serde_json::from_reader::<_, <$endpoint_ty as Endpoint>::RequestData>(read) {
-                        Ok(data) => match <$endpoint_ty>::handle(&pk, data) {
+                        Ok(data) => match <$endpoint_ty>::handle(&kp, data) {
                             Ok(resp) => endpoints::json_response(&resp, 200),
                             Err(e) => endpoints::json_response(&e, 400),
                         },

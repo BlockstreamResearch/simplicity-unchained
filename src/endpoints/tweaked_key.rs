@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 use super::Endpoint;
-use p2c_s2c::secp256k1::XOnlyPublicKey;
+use p2c_s2c::secp256k1::{Keypair, XOnlyPublicKey};
 use p2c_s2c::TweakedKey;
 use simplicity::{Cmr, CommitNode};
 use simplicity::jet;
@@ -43,7 +43,7 @@ impl Endpoint for TweakedKeyEndpoint {
     type ResponseError = Error;
 
     fn handle(
-        untweaked_key: &XOnlyPublicKey,
+        untweaked_key: &Keypair,
         req: Self::RequestData,
     ) -> Result<Self::ResponseData, Self::ResponseError> {
         let prog = CommitNode::<jet::Elements>::from_str(&req.simplicity_base64)
@@ -57,7 +57,7 @@ impl Endpoint for TweakedKeyEndpoint {
             });
         }
 
-        let tweaked_key = TweakedKey::new(untweaked_key, cmr.as_ref());
+        let tweaked_key = TweakedKey::new(&untweaked_key.x_only_public_key().0, cmr.as_ref());
         Ok(Response {
             program_cmr: cmr,
             tweaked_key,

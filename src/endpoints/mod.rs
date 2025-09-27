@@ -4,7 +4,7 @@ mod untweaked_key;
 mod tweaked_key;
 mod sign_elements;
 
-use p2c_s2c::secp256k1::XOnlyPublicKey;
+use p2c_s2c::secp256k1::Keypair;
 use tiny_http::{Header, Response, StatusCode};
 
 use std::io::Cursor;
@@ -31,7 +31,7 @@ pub trait Endpoint {
     type ResponseError: serde::Serialize;
 
     fn handle(
-        untweaked_key: &XOnlyPublicKey,
+        untweaked_key: &Keypair,
         data: Self::RequestData,
     ) -> Result<Self::ResponseData, Self::ResponseError>;
 }
