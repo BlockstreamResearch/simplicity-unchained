@@ -8,10 +8,9 @@ use std::{env, fs};
 
 use anyhow::Context as _;
 use p2c_s2c::secp256k1::{Keypair, Secp256k1};
-use simplicity::Cmr;
 use tiny_http::Server;
 
-use crate::endpoints::{UntweakedKeyEndpoint, TweakedKeyEndpoint, Endpoint};
+use crate::endpoints::{UntweakedKeyEndpoint, TweakedKeyEndpoint, Endpoint, SignElementsEndpoint};
 
 fn handle_error(_: &str, _: std::io::Error) {
     // FIXME do something
@@ -69,22 +68,9 @@ fn main() -> Result<(), anyhow::Error> {
 
         handle_endpoint!(UntweakedKeyEndpoint);
         handle_endpoint!(TweakedKeyEndpoint);
+        handle_endpoint!(SignElementsEndpoint);
 
-        let response = match url.as_str() {
-            "/simplicity-unchained/sign-elements" => {
-                #[derive(serde::Deserialize)]
-                struct Request {
-                    simplicity_base64: String,
-                    witness_hex: String,
-                    #[serde(default)]
-                    cmr: Option<Cmr>,
-                }
-
-                todo!()
-            },
-            x => endpoints::response_404(x),
-        };
-
+        let response = endpoints::response_404(&url);
         if let Err(e) = request.respond(response) {
             handle_error(&format!("responding to {}", url), e);
         }

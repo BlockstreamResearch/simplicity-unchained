@@ -2,6 +2,7 @@
 
 mod untweaked_key;
 mod tweaked_key;
+mod sign_elements;
 
 use p2c_s2c::secp256k1::XOnlyPublicKey;
 use tiny_http::{Header, Response, StatusCode};
@@ -10,6 +11,7 @@ use std::io::Cursor;
 
 pub use untweaked_key::UntweakedKeyEndpoint;
 pub use tweaked_key::TweakedKeyEndpoint;
+pub use sign_elements::SignElementsEndpoint;
 
 /// An endpoint that the server will listen for.
 ///
