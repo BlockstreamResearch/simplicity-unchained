@@ -1,0 +1,18 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "simplicity-unchained"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5.53", features = ["derive"] }
+core = { path = "../core" }
+elements = "0.26.1"
+hex = "0.4"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.148"
