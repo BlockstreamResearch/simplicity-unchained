@@ -15,7 +15,8 @@ WORKDIR /build
 # Copy workspace manifests
 COPY Cargo.toml rust-toolchain.toml ./
 
-# Copy core and service crates
+# Copy all workspace members (required by Cargo workspace)
+COPY cli ./cli
 COPY core ./core
 COPY service ./service
 
