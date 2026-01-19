@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use elements::{AddressParams, bitcoin::PublicKey};
+use hal_simplicity::simplicity::elements::{AddressParams, bitcoin::PublicKey};
 use serde_json::json;
 use simplicity_unchained_core::utils::generate_2of2_multisig_address;
 

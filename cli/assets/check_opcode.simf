@@ -1,0 +1,6 @@
+fn main() {
+    // Test that the opcode extraction works correctly
+    // 
+    // You can read any opcode from a script and build an additional branching logic on it.
+    assert!(jet::eq_8(jet::get_opcode_from_script(0), 0x52)); // 0x52 == OP_2
+}

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use hal_simplicity::hal_simplicity::Program;
+use hal_simplicity::simplicity::BitMachine;
 use hal_simplicity::simplicity::bit_machine::ExecutionError;
-use hal_simplicity::simplicity::elements::BlockHash;
 use hal_simplicity::simplicity::elements::taproot::{LeafVersion, TaprootMerkleBranch};
+use hal_simplicity::simplicity::elements::{BlockHash, Script};
 use hal_simplicity::simplicity::elements::{
     Transaction, pset::PartiallySignedTransaction, schnorr::UntweakedPublicKey,
 };
-use hal_simplicity::simplicity::{BitMachine, jet};
 use hal_simplicity::simplicity::{
     Cmr,
     elements::taproot::ControlBlock,
@@ -17,6 +17,8 @@ use hal_simplicity::simplicity::{
 use hex_literal::hex;
 
 use crate::Network;
+use crate::jets::environments::UnchainedEnv;
+use crate::jets::unchained::ElementsExtension;
 
 pub struct SimplicityRunner;
 
@@ -53,15 +55,23 @@ pub enum RunnerError {
 impl SimplicityRunner {
     pub fn execute(
         program: &str,
-        witness: &str,
+        witness: Option<&str>,
         input_idx: usize,
         pset: &PartiallySignedTransaction,
+        redeem_script: Script,
         network: Network,
     ) -> Result<(), RunnerError> {
-        let program = Program::<jet::Elements>::from_str(program, Some(witness))
+        let program = Program::<ElementsExtension>::from_str(program, witness)
             .map_err(RunnerError::ProgramParse)?;
 
-        let env = execution_environment(&pset, input_idx, program.cmr(), network.genesis_hash())?;
+        let elements_env = elements_execution_environment(
+            &pset,
+            input_idx,
+            program.cmr(),
+            network.genesis_hash(),
+        )?;
+
+        let env = UnchainedEnv::new(redeem_script, elements_env);
 
         let redeem_node = program.redeem_node().ok_or(RunnerError::NoRedeemNode)?;
 
@@ -75,7 +85,7 @@ impl SimplicityRunner {
     }
 }
 
-fn execution_environment(
+fn elements_execution_environment(
     pset: &PartiallySignedTransaction,
     input_idx: usize,
     cmr: Cmr,
@@ -123,7 +133,7 @@ fn dummy_control_block() -> ControlBlock {
     ControlBlock {
         leaf_version,
         internal_key,
-        output_key_parity: elements::secp256k1_zkp::Parity::Even,
+        output_key_parity: hal_simplicity::simplicity::elements::secp256k1_zkp::Parity::Even,
         merkle_branch: TaprootMerkleBranch::default(),
     }
 }
@@ -132,14 +142,20 @@ fn dummy_control_block() -> ControlBlock {
 mod tests {
     use crate::runner::SimplicityRunner;
 
+    use hal_simplicity::simplicity::elements::Script;
+    use hal_simplicity::simplicity::elements::hex::FromHex;
     use hex_literal::hex;
 
+    use hal_simplicity::simplicity::elements::encode::deserialize;
     use hal_simplicity::simplicity::elements::pset::PartiallySignedTransaction;
-    use simplicity::elements::encode::deserialize;
 
     #[test]
     fn it_works() {
-        let program = "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA";
+        let script = Script::from_hex(
+            "5221033523982d58e94be3b735731593f8225043880d53727235b566c515d24a0f7baf21025eb4655feae15a304653e27441ca8e8ced2bef89c22ab6b20424b4c07b3d14cc52ae"
+        ).unwrap();
+
+        let program = "4gTaj1eRafl6Ylk5SOxn0YFNK1owqziBW1okfwoUbyI60plzg9+aftH+iEF0HPfdhmi6u3/nCaFpYYsjIjrE6oXS8IEIFCbTPw2hAxCY+ss0X9VBirWgK0d+njZWFwRZorrYK2HgFBAIQKE2ACCP8CEChBhocKkGHHCxbGAgG0DgoHCw";
 
         let pset_bytes = hex!(
             "70736574ff0102040200000001030400000000010401010105010201fb04020000000001014e01499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c140100000000000186a000220020649be4e4f326f85b2187adb0698d9cab59c4b1c747cc6d884211e90e60484cf001070001080100010e201b42ba45a12d33a9efd32b738e603f5c606dcd59353fc5826f7486d4d5459858010f0400000000011004ffffffff00010308b88201000000000007fc04707365740220499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c140104220020649be4e4f326f85b2187adb0698d9cab59c4b1c747cc6d884211e90e60484cf000010308e80300000000000007fc04707365740220499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c1401040000"
@@ -147,7 +163,14 @@ mod tests {
 
         let pset: PartiallySignedTransaction = deserialize(&pset_bytes).expect("valid PSET");
 
-        SimplicityRunner::execute(program, "", 0, &pset, crate::Network::LiquidTestnet)
-            .expect("should run")
+        SimplicityRunner::execute(
+            program,
+            Some(""),
+            0,
+            &pset,
+            script,
+            crate::Network::LiquidTestnet,
+        )
+        .expect("should run")
     }
 }

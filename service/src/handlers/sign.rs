@@ -61,7 +61,7 @@ pub struct SignPsetRequest {
     #[validate(length(min = 1))]
     pub program: String,
 
-    pub witness: String,
+    pub witness: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,19 +112,21 @@ fn sign_pset_internal(
         ));
     }
 
+    let redeem_script_bytes = hex::decode(&request.redeem_script_hex)
+        .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
+
+    let redeem_script = Script::from(redeem_script_bytes);
+
     // Validate with Simplicity runner before signing
     SimplicityRunner::execute(
         &request.program,
-        &request.witness,
+        request.witness.as_deref(),
         request.input_index,
         &pset,
+        redeem_script.clone(),
         state.network.clone(),
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
-
-    let redeem_script_bytes = hex::decode(&request.redeem_script_hex)
-        .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
-    let redeem_script = Script::from(redeem_script_bytes);
 
     let public_key = PublicKey::from_private_key(
         &*state.secp,
@@ -292,7 +294,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
 
         let result = sign_pset_internal(&state, request);
@@ -333,7 +335,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: "".to_string(),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
 
         let result = sign_pset_internal(&state, request);
@@ -353,7 +355,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: "".to_string(),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
 
         let result = sign_pset_internal(&state, request);
@@ -378,7 +380,7 @@ mod tests {
             input_index: 999, // Out of bounds
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
 
         let result = sign_pset_internal(&state, request);
@@ -405,7 +407,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: "invalid_hex!!!".to_string(),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
 
         let result = sign_pset_internal(&state, request);
@@ -434,7 +436,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
 
         let result = sign_pset_internal(&state, request).unwrap();
@@ -523,7 +525,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
         assert!(valid_request.validate().is_ok());
 
@@ -533,7 +535,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: "".to_string(),
+            witness: None,
         };
         assert!(invalid_request.validate().is_err());
     }

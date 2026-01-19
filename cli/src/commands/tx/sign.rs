@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use elements::{
+use hal_simplicity::simplicity::elements::{
     EcdsaSighashType,
     bitcoin::PublicKey,
     encode::{deserialize, serialize},
@@ -41,9 +41,9 @@ pub fn execute(
 
     let public_key = PublicKey::from_private_key(
         &secp,
-        &elements::bitcoin::PrivateKey {
+        &hal_simplicity::simplicity::elements::bitcoin::PrivateKey {
             compressed: true,
-            network: elements::bitcoin::NetworkKind::Main,
+            network: hal_simplicity::simplicity::elements::bitcoin::NetworkKind::Main,
             inner: secret_key,
         },
     );

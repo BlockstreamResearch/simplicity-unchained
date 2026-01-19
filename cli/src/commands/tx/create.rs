@@ -1,8 +1,12 @@
 use anyhow::{Context, Result, anyhow};
+
+use hal_simplicity::simplicity::elements;
+
 use elements::{
     Address, AddressParams, AssetId, OutPoint, Transaction, TxIn, TxOut, confidential,
     encode::serialize, pset::PartiallySignedTransaction,
 };
+
 use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
@@ -73,7 +77,7 @@ fn fetch_tx_output(txid: &str, vout: u32, network: &str) -> Result<TxOut> {
                 last_error = Some(e);
                 if attempt < MAX_RETRIES {
                     eprintln!(
-                        "Attempt {}/{} failed, retrying in {} seconds...",
+                        "Attempt {}/{} failed, RPC is not responding, retrying in {} seconds...",
                         attempt, MAX_RETRIES, RETRY_DELAY_SECS
                     );
                     thread::sleep(Duration::from_secs(RETRY_DELAY_SECS));
