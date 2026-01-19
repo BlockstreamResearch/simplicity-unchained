@@ -1,0 +1,13 @@
+// Test that X-only public keys can be extracted from a script
+//
+// You can utilize pubkeys embedded in scripts to verify signatures against them.
+// Or do other cryptographic operations that require pubkeys.
+fn main() {
+    let signature: [u8; 64] = 0x3d5e45a7e5e98964e523b19f460534ad68c2ace2056d6891fc2851bc88eb4a65ce0f7e69fb47fa2105d073df7619a2eaedff9c2685a5862c8c88eb13aa174bc2;
+
+    let msg_hash: u256 = 0x9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08;
+
+    let pubkey: Pubkey = jet::get_pubkey_from_script(1);
+
+    jet::bip_0340_verify((pubkey, msg_hash), signature)
+}

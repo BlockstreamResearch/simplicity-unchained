@@ -9,8 +9,7 @@ name = "simplicity_unchained_core"
 path = "src/lib.rs"
 
 [dependencies]
-elements = "0.26.1"
 hex-literal = "1.1.0"
-simplicity-lang = { git = "https://github.com/ivanlele/rust-simplicity", rev = "821fd4542dad452a6e1fc821b04141df797f218b"}
-hal-simplicity = { git = "https://github.com/BlockstreamResearch/hal-simplicity", rev = "31083136cad4799022044c65c7407deb828fb0a9" }
-thiserror = "2.0.17"
+hal-simplicity = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }

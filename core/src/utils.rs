@@ -1,4 +1,4 @@
-use elements::{
+use hal_simplicity::simplicity::elements::{
     Address, AddressParams,
     bitcoin::PublicKey,
     hashes::Hash as ElementsHash,
@@ -6,7 +6,7 @@ use elements::{
     script::{Builder as ScriptBuilder, Script},
     secp256k1_zkp::{Secp256k1, SecretKey, rand::rngs::OsRng},
 };
-use simplicity::hashes::{HashEngine, sha256};
+use hal_simplicity::simplicity::hashes::{HashEngine, sha256};
 use thiserror::Error;
 
 /// Errors that can occur in utility functions
@@ -84,7 +84,9 @@ pub fn generate_2of2_multisig_address(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use elements::secp256k1_zkp::{PublicKey as Secp256k1PublicKey, Secp256k1};
+    use hal_simplicity::simplicity::elements::secp256k1_zkp::{
+        PublicKey as Secp256k1PublicKey, Secp256k1,
+    };
 
     #[test]
     fn test_generate_keypair() {

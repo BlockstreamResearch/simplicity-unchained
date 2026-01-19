@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
-use elements::hashes::Hash;
-use simplicity::elements::BlockHash;
+use hal_simplicity::simplicity::elements::BlockHash;
+use hal_simplicity::simplicity::elements::hashes::Hash;
 
 pub mod jets;
 pub mod runner;

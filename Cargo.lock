@@ -397,7 +397,7 @@ dependencies = [
  "anyhow",
  "clap 4.5.53",
  "core",
- "elements 0.26.1",
+ "hal-simplicity",
  "hex 0.4.3",
  "reqwest",
  "serde",
@@ -414,10 +414,9 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 name = "core"
 version = "0.1.0"
 dependencies = [
- "elements 0.26.1",
  "hal-simplicity",
+ "hex 0.4.3",
  "hex-literal",
- "simplicity-lang 0.6.0",
  "thiserror",
 ]
 
@@ -493,18 +492,6 @@ dependencies = [
  "bitcoin",
  "secp256k1-zkp",
  "serde",
- "serde_json",
-]
-
-[[package]]
-name = "elements"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d562b364c5d2aced40b01b3f73fc968311787e6813957593d4ffa94cd8733e3"
-dependencies = [
- "bech32",
- "bitcoin",
- "secp256k1-zkp",
  "serde_json",
 ]
 
@@ -711,11 +698,12 @@ dependencies = [
 
 [[package]]
 name = "hal-simplicity"
-version = "0.1.0"
-source = "git+https://github.com/BlockstreamResearch/hal-simplicity?rev=31083136cad4799022044c65c7407deb828fb0a9#31083136cad4799022044c65c7407deb828fb0a9"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52a540615bef9124e283bbd087e007af922c9f6cfac210412bda4d1c34b2a74d"
 dependencies = [
  "clap 2.33.3",
- "elements 0.25.2",
+ "elements",
  "fern",
  "hal",
  "hex 0.3.2",
@@ -723,7 +711,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "simplicity-lang 0.5.0",
+ "simplicity-lang",
  "thiserror",
 ]
 
@@ -1742,53 +1730,28 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "simplicity-lang"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "525879699aba1f7f75c0d97355475072adeb0ed0530df4e18f23235252475e68"
+checksum = "70e57bd4d84853974a212eab24ed89da54f49fbccf5e33e93bcd29f0a6591cd5"
 dependencies = [
  "bitcoin",
  "bitcoin_hashes",
  "byteorder",
- "elements 0.25.2",
- "getrandom 0.2.16",
- "hex-conservative",
- "miniscript",
- "santiago",
- "serde",
- "simplicity-sys 0.5.0",
-]
-
-[[package]]
-name = "simplicity-lang"
-version = "0.6.0"
-source = "git+https://github.com/ivanlele/rust-simplicity?rev=821fd4542dad452a6e1fc821b04141df797f218b#821fd4542dad452a6e1fc821b04141df797f218b"
-dependencies = [
- "bitcoin",
- "bitcoin_hashes",
- "byteorder",
- "elements 0.25.2",
+ "elements",
  "getrandom 0.2.16",
  "ghost-cell",
  "hex-conservative",
  "miniscript",
  "santiago",
- "simplicity-sys 0.6.0",
+ "serde",
+ "simplicity-sys",
 ]
 
 [[package]]
 name = "simplicity-sys"
-version = "0.5.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3abf9c7d64c5bf45bb2fb966f3b0637d8c13c8d5cdfbd7587900421cb7584c49"
-dependencies = [
- "bitcoin_hashes",
- "cc",
-]
-
-[[package]]
-name = "simplicity-sys"
-version = "0.6.0"
-source = "git+https://github.com/ivanlele/rust-simplicity?rev=821fd4542dad452a6e1fc821b04141df797f218b#821fd4542dad452a6e1fc821b04141df797f218b"
+checksum = "8bcb4e5bfc15080d67e0ce2c17d1c31bfb7521d65c86ea26ed0de72d5119d119"
 dependencies = [
  "bitcoin_hashes",
  "cc",

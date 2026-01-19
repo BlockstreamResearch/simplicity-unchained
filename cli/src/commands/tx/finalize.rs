@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use elements::{
+use hal_simplicity::simplicity::elements::{
     bitcoin::PublicKey,
     encode::{deserialize, serialize},
     pset::PartiallySignedTransaction,
