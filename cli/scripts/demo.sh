@@ -67,7 +67,7 @@ echo "Created PSET (unsigned): $PSET_HEX"
 echo
 
 echo "==== Step 5: First Signature (Co-signer) ===="
-echo "Calling sign service at http://localhost:8080/sign/pset..."
+echo "Calling sign service at http://localhost:8080/simplicity-unchained/sign/pset..."
 
 # Simple Simplicity program that always returns true
 PROGRAM="zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA"
@@ -80,7 +80,7 @@ SIGN_REQUEST=$(jq -n \
   --arg witness "$WITNESS" \
   '{pset_hex: $pset, redeem_script_hex: $redeem, input_index: 0, program: $program, witness: $witness}')
 
-PSET_SIGN1_DATA=$(curl -s -X POST http://localhost:8080/sign/pset \
+PSET_SIGN1_DATA=$(curl -s -X POST http://localhost:8080/simplicity-unchained/sign/pset \
   -H "Content-Type: application/json" \
   -d "$SIGN_REQUEST")
 

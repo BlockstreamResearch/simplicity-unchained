@@ -35,7 +35,7 @@ network = "liquidtestnet"
 
 The service exposes the following endpoints:
 
-1. `POST /sign/pset`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig transaction.
+1. `POST /simplicity-unchained/sign/pset`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig transaction.
     **Request Body**:
 
     ```json

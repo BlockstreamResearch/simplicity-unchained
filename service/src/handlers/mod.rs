@@ -18,8 +18,8 @@ async fn version() -> impl IntoResponse {
 
 pub fn routes(signer_state: sign::SignerState) -> Router {
     Router::new()
-        .route("/version", get(version))
-        .route("/sign/pset", post(sign::sign_pset))
+        .route("/simplicity-unchained/version", get(version))
+        .route("/simplicity-unchained/sign/pset", post(sign::sign_pset))
         .with_state(signer_state)
 }
 
