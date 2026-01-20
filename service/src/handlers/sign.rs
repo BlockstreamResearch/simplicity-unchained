@@ -1,6 +1,13 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
-use hal_simplicity::simplicity::elements;
+use hal_simplicity::{
+    bitcoin::secp256k1,
+    simplicity::elements::{
+        self,
+        schnorr::{TapTweak, UntweakedKeypair},
+        taproot::TapNodeHash,
+    },
+};
 
 use elements::{
     EcdsaSighashType,
@@ -118,7 +125,7 @@ fn sign_pset_internal(
     let redeem_script = Script::from(redeem_script_bytes);
 
     // Validate with Simplicity runner before signing
-    SimplicityRunner::execute(
+    let cmr = SimplicityRunner::execute(
         &request.program,
         request.witness.as_deref(),
         request.input_index,
@@ -128,14 +135,18 @@ fn sign_pset_internal(
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
-    let public_key = PublicKey::from_private_key(
+    let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
+    let tweaked_keypair = untweaked_keypair.tap_tweak(
         &*state.secp,
-        &elements::bitcoin::PrivateKey {
-            compressed: true,
-            network: elements::bitcoin::NetworkKind::Main,
-            inner: state.secret_key,
-        },
+        Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
     );
+
+    let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+
+    let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+        tweaked_public_key.into_inner(),
+        tweaked_parity,
+    ));
 
     let tx = pset
         .extract_tx()
@@ -159,7 +170,9 @@ fn sign_pset_internal(
 
     // Sign the sighash
     let msg = Message::from_digest(sighash.to_byte_array());
-    let signature = state.secp.sign_ecdsa(&msg, &state.secret_key);
+    let signature = state
+        .secp
+        .sign_ecdsa(&msg, &tweaked_keypair.to_inner().secret_key());
 
     let mut sig_bytes = signature.serialize_der().to_vec();
     sig_bytes.push(EcdsaSighashType::All.as_u32() as u8);
@@ -193,9 +206,10 @@ mod tests {
         script::Builder as ScriptBuilder,
         secp256k1_zkp::Secp256k1,
     };
+    use hal_simplicity::hal_simplicity::Program;
     use std::str::FromStr;
 
-    use simplicity_unchained_core::Network;
+    use simplicity_unchained_core::{Network, jets::unchained::ElementsExtension};
 
     fn create_test_signer_state() -> SignerState {
         let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
@@ -294,7 +308,7 @@ mod tests {
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: None,
+            witness: Some("".to_string()),
         };
 
         let result = sign_pset_internal(&state, request);
@@ -431,12 +445,14 @@ mod tests {
         let pset_bytes = serialize(&pset);
         let pset_hex = hex::encode(&pset_bytes);
 
+        let program = "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string();
+
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
-            program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: None,
+            program: program.clone(),
+            witness: Some("".to_string()),
         };
 
         let result = sign_pset_internal(&state, request).unwrap();
@@ -445,15 +461,23 @@ mod tests {
         let signed_pset_bytes = hex::decode(&result.pset_hex).unwrap();
         let signed_pset: PartiallySignedTransaction = deserialize(&signed_pset_bytes).unwrap();
 
-        // Get the signature from the PSET
-        let public_key = PublicKey::from_private_key(
+        let program =
+            Program::<ElementsExtension>::from_str(&program, Some("")).expect("valid program");
+
+        let cmr = program.commit_prog().cmr();
+
+        let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
+        let tweaked_keypair = untweaked_keypair.tap_tweak(
             &*state.secp,
-            &elements::bitcoin::PrivateKey {
-                compressed: true,
-                network: elements::bitcoin::NetworkKind::Main,
-                inner: state.secret_key,
-            },
+            Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
         );
+
+        let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+
+        let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+            tweaked_public_key.into_inner(),
+            tweaked_parity,
+        ));
 
         let sig_bytes = signed_pset.inputs()[0]
             .partial_sigs
@@ -485,7 +509,7 @@ mod tests {
         let verification =
             state
                 .secp
-                .verify_ecdsa(&msg, &signature, &state.secret_key.public_key(&*state.secp));
+                .verify_ecdsa(&msg, &signature, &tweaked_keypair.to_inner().public_key());
 
         assert!(verification.is_ok());
     }

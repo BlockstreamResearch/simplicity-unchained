@@ -26,10 +26,26 @@ wait_for_transaction() {
   exit 1
 }
 
+# Simple Simplicity program that always returns true
+PROGRAM="zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA"
+WITNESS=""
+
 NETWORK="liquid_testnet"
-COSIGNER_PUBKEY="033523982d58e94be3b735731593f8225043880d53727235b566c515d24a0f7baf"
-COSIGNER_SECKEY="804622cda0d8e634317a12651d91751ceff5c081f2b5f63ef7912725c7275e5d"
 FAUCET_ADDRESS="tlq1qq2g07nju42l0nlx0erqa3wsel2l8prnq96rlnhml262mcj7pe8w6ndvvyg237japt83z24m8gu4v3yfhaqvrqxydadc9scsmw"
+
+echo "==== Step 0: Get Tweaked Public Key for Simplicity Program ===="
+TWEAK_REQUEST=$(jq -n --arg program "$PROGRAM" '{program: $program}')
+
+TWEAK_RESPONSE=$(curl -s -X POST http://localhost:30431/simplicity-unchained/tweak \
+  -H "Content-Type: application/json" \
+  -d "$TWEAK_REQUEST")
+
+# Extract the tweaked public key from the response and set it as COSIGNER_PUBKEY
+COSIGNER_PUBKEY=$(echo "$TWEAK_RESPONSE" | jq -r '.tweaked_public_key_hex')
+
+echo "Tweaked public key (Co-signer): $COSIGNER_PUBKEY"
+echo
+
 
 echo "==== Step 1: Generate User Keypair ===="
 USER_KEYPAIR=$(cargo run --quiet keypair generate)
@@ -67,11 +83,7 @@ echo "Created PSET (unsigned): $PSET_HEX"
 echo
 
 echo "==== Step 5: First Signature (Co-signer) ===="
-echo "Calling sign service at http://localhost:8080/simplicity-unchained/sign/pset..."
-
-# Simple Simplicity program that always returns true
-PROGRAM="zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA"
-WITNESS=""
+echo "Calling sign service at http://localhost:30431/simplicity-unchained/sign/pset..."
 
 SIGN_REQUEST=$(jq -n \
   --arg pset "$PSET_HEX" \
@@ -80,7 +92,7 @@ SIGN_REQUEST=$(jq -n \
   --arg witness "$WITNESS" \
   '{pset_hex: $pset, redeem_script_hex: $redeem, input_index: 0, program: $program, witness: $witness}')
 
-PSET_SIGN1_DATA=$(curl -s -X POST http://localhost:8080/simplicity-unchained/sign/pset \
+PSET_SIGN1_DATA=$(curl -s -X POST http://localhost:30431/simplicity-unchained/sign/pset \
   -H "Content-Type: application/json" \
   -d "$SIGN_REQUEST")
 
