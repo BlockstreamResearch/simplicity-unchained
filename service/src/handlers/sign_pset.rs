@@ -1,5 +1,7 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
+use log::error;
+
 use hal_simplicity::{
     bitcoin::secp256k1,
     simplicity::elements::{
@@ -16,40 +18,19 @@ use elements::{
     hashes::Hash,
     pset::PartiallySignedTransaction,
     script::Script,
-    secp256k1_zkp::{All, Message, Secp256k1, SecretKey},
+    secp256k1_zkp::Message,
     sighash::SighashCache,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
 use validator::Validate;
 
-use simplicity_unchained_core::{Network, runner::SimplicityRunner};
+use simplicity_unchained_core::runner::SimplicityRunner;
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
 
-#[derive(Clone, Debug)]
-pub struct SignerState {
-    pub secret_key: SecretKey,
-    pub secp: Arc<Secp256k1<All>>,
-    pub network: Network,
-}
-
-impl SignerState {
-    pub fn new(secret_key_hex: &str, network: Network) -> Result<Self, String> {
-        let secret_key_bytes =
-            hex::decode(secret_key_hex).map_err(|e| format!("Invalid private key hex: {}", e))?;
-
-        let secret_key = SecretKey::from_slice(&secret_key_bytes)
-            .map_err(|e| format!("Invalid private key: {}", e))?;
-
-        Ok(Self {
-            secret_key,
-            secp: Arc::new(Secp256k1::new()),
-            network,
-        })
-    }
-}
+use super::SignerState;
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct SignPsetRequest {
@@ -86,18 +67,21 @@ pub async fn sign_pset(
 ) -> impl IntoResponse {
     // Validate request using validator
     if let Err(errors) = request.validate() {
+        let error_msg = format!("Validation failed: {}", errors);
+        error!("[400] Sign PSET validation error: {}", error_msg);
         return (
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: format!("Validation failed: {}", errors),
-            }),
+            Json(ErrorResponse { error: error_msg }),
         )
             .into_response();
     }
 
     match sign_pset_internal(&state, request) {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
+        Err(e) => {
+            error!("[400] Sign PSET error: {}", e);
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
+        }
     }
 }
 
@@ -125,13 +109,13 @@ fn sign_pset_internal(
     let redeem_script = Script::from(redeem_script_bytes);
 
     // Validate with Simplicity runner before signing
-    let cmr = SimplicityRunner::execute(
+    let cmr = SimplicityRunner::execute_elements(
         &request.program,
         request.witness.as_deref(),
         request.input_index,
         &pset,
         redeem_script.clone(),
-        state.network.clone(),
+        state.elements_network.clone(),
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
@@ -197,6 +181,8 @@ fn sign_pset_internal(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use elements::{
         OutPoint, Transaction, TxIn, TxInWitness, TxOut, Txid,
@@ -209,14 +195,19 @@ mod tests {
     use hal_simplicity::hal_simplicity::Program;
     use std::str::FromStr;
 
-    use simplicity_unchained_core::{Network, jets::unchained::ElementsExtension};
+    use hal_simplicity::simplicity::elements::secp256k1_zkp::SecretKey;
+
+    use simplicity_unchained_core::{
+        BitcoinNetwork, ElementsNetwork, jets::elements::ElementsExtension,
+    };
 
     fn create_test_signer_state() -> SignerState {
         let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
         SignerState {
             secret_key,
             secp: Arc::new(Secp256k1::new()),
-            network: simplicity_unchained_core::Network::LiquidTestnet,
+            elements_network: simplicity_unchained_core::ElementsNetwork::LiquidTestnet,
+            bitcoin_network: simplicity_unchained_core::BitcoinNetwork::Testnet,
         }
     }
 
@@ -517,14 +508,22 @@ mod tests {
     #[test]
     fn test_signer_state_new_valid_key() {
         let secret_key_hex = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
-        let result = SignerState::new(secret_key_hex, Network::LiquidTestnet);
+        let result = SignerState::new(
+            secret_key_hex,
+            ElementsNetwork::LiquidTestnet,
+            BitcoinNetwork::Testnet,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_signer_state_new_invalid_hex() {
         let secret_key_hex = "not_valid_hex";
-        let result = SignerState::new(secret_key_hex, Network::LiquidTestnet);
+        let result = SignerState::new(
+            secret_key_hex,
+            ElementsNetwork::LiquidTestnet,
+            BitcoinNetwork::Testnet,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid private key hex"));
     }
@@ -532,7 +531,11 @@ mod tests {
     #[test]
     fn test_signer_state_new_invalid_key_length() {
         let secret_key_hex = "cdcdcd"; // Too short
-        let result = SignerState::new(secret_key_hex, Network::LiquidTestnet);
+        let result = SignerState::new(
+            secret_key_hex,
+            ElementsNetwork::LiquidTestnet,
+            BitcoinNetwork::Testnet,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid private key"));
     }

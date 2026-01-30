@@ -25,10 +25,16 @@ enum Commands {
         command: KeypairCommands,
     },
 
-    /// Transaction operations
+    /// Transaction operations (Elements/Liquid)
     Tx {
         #[command(subcommand)]
         command: TxCommands,
+    },
+
+    /// Bitcoin transaction operations
+    BtcTx {
+        #[command(subcommand)]
+        command: BtcTxCommands,
     },
 }
 
@@ -44,7 +50,7 @@ enum AddressCommands {
         #[arg(short = '2', long)]
         pubkey2: String,
 
-        /// Network (elements, liquid, liquid_testnet)
+        /// Network (elements, liquid, liquid_testnet, bitcoin, testnet, testnet4)
         #[arg(short, long, default_value = "elements")]
         network: String,
     },
@@ -54,6 +60,50 @@ enum AddressCommands {
 enum KeypairCommands {
     /// Generate a new keypair
     Generate,
+}
+
+#[derive(Subcommand)]
+enum BtcTxCommands {
+    /// Create a PSBT (PartiallySignedTransaction) from UTXOs
+    Create {
+        /// Transaction input in format: txid:vout
+        #[arg(short = 'i', long = "input", num_args = 1.., required = true)]
+        inputs: Vec<String>,
+
+        /// Transaction output in format: address:value
+        #[arg(short = 'o', long = "output", num_args = 1.., required = true)]
+        outputs: Vec<String>,
+
+        /// Network (bitcoin, testnet)
+        #[arg(short, long, default_value = "bitcoin")]
+        network: String,
+    },
+
+    /// Sign a PSBT with one secret key (for co-signing)
+    Sign {
+        /// PSBT in hex format
+        #[arg(short, long)]
+        psbt: String,
+
+        /// Secret key in hex format
+        #[arg(short = 'k', long)]
+        secret_key: String,
+
+        /// Input index to sign
+        #[arg(short, long)]
+        input_index: usize,
+
+        /// Redeem script in hex format
+        #[arg(short, long)]
+        redeem_script: String,
+    },
+
+    /// Finalize a PSBT into a broadcastable transaction
+    Finalize {
+        /// PSBT in hex format
+        #[arg(short, long)]
+        psbt: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -145,6 +195,29 @@ fn main() -> Result<()> {
 
             TxCommands::Finalize { pset } => {
                 commands::tx::finalize::execute(&pset)?;
+            }
+        },
+
+        Commands::BtcTx { command } => match command {
+            BtcTxCommands::Create {
+                inputs,
+                outputs,
+                network,
+            } => {
+                commands::btc_tx::create::execute(&inputs, &outputs, &network)?;
+            }
+
+            BtcTxCommands::Sign {
+                psbt,
+                secret_key,
+                input_index,
+                redeem_script,
+            } => {
+                commands::btc_tx::sign::execute(&psbt, &secret_key, input_index, &redeem_script)?;
+            }
+
+            BtcTxCommands::Finalize { psbt } => {
+                commands::btc_tx::finalize::execute(&psbt)?;
             }
         },
     }

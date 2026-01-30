@@ -28,7 +28,9 @@ port = 8080
 # this is a demo key, do not use it anywhere else
 private_key = "804622cda0d8e634317a12651d91751ceff5c081f2b5f63ef7912725c7275e5d"
 # Network to get metadata from: liquid or liquidtestnet
-network = "liquidtestnet"
+elements_network = "liquidtestnet"
+# Bitcoin network for signature computation: bitcoin, testnet, testnet4
+bitcoin_network = "testnet4"
 ```
 
 ## Endpoints
@@ -63,6 +65,7 @@ The service exposes the following endpoints:
 ```
 
 **Request Fields**:
+
 - `pset_hex`: The PSET (Partially Signed Elements Transaction) encoded as a hexadecimal string
 - `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
 - `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation
@@ -102,6 +105,7 @@ The service exposes the following endpoints:
 ```
 
 **Request Fields**:
+
 - `program`: The Simplicity program to compute the CMR from (must be a non-empty string)
 
 **Success Response**:
@@ -114,6 +118,7 @@ The service exposes the following endpoints:
 ```
 
 **Response Fields**:
+
 - `cmr_hex`: The 32-byte commitment Merkle root (CMR) of the program, encoded as a 64-character hexadecimal string
 - `tweaked_public_key_hex`: The 33-byte compressed tweaked public key, encoded as a 66-character hexadecimal string
 

@@ -13,7 +13,7 @@ mod tests {
     use hex_literal::hex;
 
     use crate::jets::environments::UnchainedEnv;
-    use crate::jets::unchained::ElementsExtension;
+    use crate::jets::{bitcoin::CoreExtension, elements::ElementsExtension};
     use hal_simplicity::simplicity::elements::Script;
     use hal_simplicity::simplicity::elements::hex::FromHex;
     use hal_simplicity::simplicity::elements::opcodes::all::OP_PUSHNUM_2;
@@ -36,6 +36,21 @@ mod tests {
             let mut iter = BitIter::from(&source[..]);
 
             let decoded_jet = ElementsExtension::decode(&mut iter).unwrap();
+
+            assert_eq!(decoded_jet, expected_jet);
+        }
+
+        for expected_jet in CoreExtension::ALL {
+            let mut source = vec![];
+            let mut writer = BitWriter::new(&mut source);
+
+            let _ = expected_jet.encode(&mut writer).unwrap();
+
+            writer.flush_all().unwrap();
+
+            let mut iter = BitIter::from(&source[..]);
+
+            let decoded_jet = CoreExtension::decode(&mut iter).unwrap();
 
             assert_eq!(decoded_jet, expected_jet);
         }
