@@ -1,4 +1,5 @@
 pub mod sign;
+pub mod tweak;
 
 use axum::{
     Json, Router,
@@ -20,6 +21,7 @@ pub fn routes(signer_state: sign::SignerState) -> Router {
     Router::new()
         .route("/simplicity-unchained/version", get(version))
         .route("/simplicity-unchained/sign/pset", post(sign::sign_pset))
+        .route("/simplicity-unchained/tweak", post(tweak::get_tweaked_key))
         .with_state(signer_state)
 }
 

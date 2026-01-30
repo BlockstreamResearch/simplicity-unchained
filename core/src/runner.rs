@@ -60,7 +60,7 @@ impl SimplicityRunner {
         pset: &PartiallySignedTransaction,
         redeem_script: Script,
         network: Network,
-    ) -> Result<(), RunnerError> {
+    ) -> Result<Cmr, RunnerError> {
         let program = Program::<ElementsExtension>::from_str(program, witness)
             .map_err(RunnerError::ProgramParse)?;
 
@@ -81,7 +81,7 @@ impl SimplicityRunner {
         mac.exec(redeem_node, &env)
             .map_err(RunnerError::ExecutionError)?;
 
-        Ok(())
+        Ok(program.commit_prog().cmr())
     }
 }
 
@@ -163,7 +163,7 @@ mod tests {
 
         let pset: PartiallySignedTransaction = deserialize(&pset_bytes).expect("valid PSET");
 
-        SimplicityRunner::execute(
+        _ = SimplicityRunner::execute(
             program,
             Some(""),
             0,
