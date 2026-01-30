@@ -17,6 +17,8 @@ use tokio::net::TcpListener;
 
 use crate::handlers::SignerState;
 
+use crate::handlers::SignerState;
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()

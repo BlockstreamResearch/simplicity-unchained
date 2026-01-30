@@ -1,5 +1,7 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
+use log::error;
+
 use hal_simplicity::{
     bitcoin::secp256k1,
     hal_simplicity::Program,
@@ -45,8 +47,7 @@ pub async fn get_tweaked_key(
     // Validate request using validator
     if let Err(errors) = request.validate() {
         let error_msg = format!("Validation failed: {}", errors);
-        log::error!("[400] Tweak validation error: {}", error_msg);
-
+        error!("[400] Tweak validation error: {}", error_msg);
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse { error: error_msg }),
@@ -55,18 +56,9 @@ pub async fn get_tweaked_key(
     }
 
     match get_tweaked_key_internal(&state, request) {
-        Ok(response) => {
-            log::info!(
-                "[200] Tweak successful: CMR {}, Tweaked Public Key {}",
-                response.cmr_hex,
-                response.tweaked_public_key_hex
-            );
-
-            (StatusCode::OK, Json(response)).into_response()
-        }
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(e) => {
-            log::error!("[400] Tweak error: {}", e);
-
+            error!("[400] Tweak error: {}", e);
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
     }
