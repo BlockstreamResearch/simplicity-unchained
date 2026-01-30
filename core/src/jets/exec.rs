@@ -18,7 +18,11 @@ unsafe extern "C" {
 /// 2^8 |- 2^8
 ///
 /// Returns the opcode at the given index in the redeem script, each opcode is one byte.
-pub fn get_opcode_from_script(dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
+pub fn get_opcode_from_script<E>(
+    dst: &mut CFrameItem,
+    src: CFrameItem,
+    env: &UnchainedEnv<E>,
+) -> bool {
     let index = unsafe { rustsimplicity_0_6_read8(&src as *const CFrameItem) } as usize;
     if index >= env.redeem_script.len() {
         return false;
@@ -35,7 +39,11 @@ pub fn get_opcode_from_script(dst: &mut CFrameItem, src: CFrameItem, env: &Uncha
 /// 2^8 |- 2^256
 ///
 /// Each pubkey is encoded as: [OP_PUSHBYTES_33][0x02 or 0x03][32 bytes X coordinate]
-pub fn get_pubkey_from_script(dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
+pub fn get_pubkey_from_script<E>(
+    dst: &mut CFrameItem,
+    src: CFrameItem,
+    env: &UnchainedEnv<E>,
+) -> bool {
     let start_index = unsafe { rustsimplicity_0_6_read8(&src as *const CFrameItem) } as usize;
     if start_index + 34 > env.redeem_script.len() {
         return false;

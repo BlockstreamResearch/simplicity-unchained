@@ -3,11 +3,10 @@ use std::sync::Arc;
 use hal_simplicity::hal_simplicity::Program;
 use hal_simplicity::simplicity::BitMachine;
 use hal_simplicity::simplicity::bit_machine::ExecutionError;
+use hal_simplicity::simplicity::bitcoin::psbt;
 use hal_simplicity::simplicity::elements::taproot::{LeafVersion, TaprootMerkleBranch};
 use hal_simplicity::simplicity::elements::{BlockHash, Script};
-use hal_simplicity::simplicity::elements::{
-    Transaction, pset::PartiallySignedTransaction, schnorr::UntweakedPublicKey,
-};
+use hal_simplicity::simplicity::elements::{Transaction, pset, schnorr::UntweakedPublicKey};
 use hal_simplicity::simplicity::{
     Cmr,
     elements::taproot::ControlBlock,
@@ -16,9 +15,10 @@ use hal_simplicity::simplicity::{
 
 use hex_literal::hex;
 
-use crate::Network;
+use crate::jets::bitcoin::CoreExtension;
+use crate::jets::elements::ElementsExtension;
 use crate::jets::environments::UnchainedEnv;
-use crate::jets::unchained::ElementsExtension;
+use crate::{BitcoinNetwork, ElementsNetwork};
 
 pub struct SimplicityRunner;
 
@@ -53,13 +53,13 @@ pub enum RunnerError {
 }
 
 impl SimplicityRunner {
-    pub fn execute(
+    pub fn execute_elements(
         program: &str,
         witness: Option<&str>,
         input_idx: usize,
-        pset: &PartiallySignedTransaction,
+        pset: &pset::PartiallySignedTransaction,
         redeem_script: Script,
-        network: Network,
+        network: ElementsNetwork,
     ) -> Result<Cmr, RunnerError> {
         let program = Program::<ElementsExtension>::from_str(program, witness)
             .map_err(RunnerError::ProgramParse)?;
@@ -83,10 +83,35 @@ impl SimplicityRunner {
 
         Ok(program.commit_prog().cmr())
     }
+
+    // NOTE: We will need unused parameters later when we will add more jets.
+    pub fn execute_bitcoin(
+        program: &str,
+        witness: Option<&str>,
+        _input_idx: usize,
+        _psbt: &psbt::Psbt,
+        redeem_script: Script,
+        _network: BitcoinNetwork,
+    ) -> Result<Cmr, RunnerError> {
+        let program = Program::<CoreExtension>::from_str(program, witness)
+            .map_err(RunnerError::ProgramParse)?;
+
+        let env = UnchainedEnv::new(redeem_script, ());
+
+        let redeem_node = program.redeem_node().ok_or(RunnerError::NoRedeemNode)?;
+
+        let mut mac =
+            BitMachine::for_program(redeem_node).map_err(RunnerError::BitMachineConstruction)?;
+
+        mac.exec(redeem_node, &env)
+            .map_err(RunnerError::ExecutionError)?;
+
+        Ok(program.commit_prog().cmr())
+    }
 }
 
 fn elements_execution_environment(
-    pset: &PartiallySignedTransaction,
+    pset: &pset::PartiallySignedTransaction,
     input_idx: usize,
     cmr: Cmr,
     genesis_hash: BlockHash,
@@ -163,13 +188,13 @@ mod tests {
 
         let pset: PartiallySignedTransaction = deserialize(&pset_bytes).expect("valid PSET");
 
-        _ = SimplicityRunner::execute(
+        _ = SimplicityRunner::execute_elements(
             program,
             Some(""),
             0,
             &pset,
             script,
-            crate::Network::LiquidTestnet,
+            crate::ElementsNetwork::LiquidTestnet,
         )
         .expect("should run")
     }

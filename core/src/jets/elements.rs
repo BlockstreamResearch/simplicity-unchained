@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::sync::Arc;
 
 use hal_simplicity::simplicity::Cmr;
 use hal_simplicity::simplicity::Cost;
@@ -6,6 +7,9 @@ use hal_simplicity::simplicity::ffi::CFrameItem;
 use hal_simplicity::simplicity::jet::type_name::TypeName;
 use hal_simplicity::simplicity::jet::{Elements, Jet};
 use hal_simplicity::simplicity::{BitIter, BitWriter, decode};
+
+use hal_simplicity::simplicity::elements::Transaction;
+use hal_simplicity::simplicity::jet::elements::ElementsEnv;
 
 use super::environments::UnchainedEnv;
 
@@ -512,8 +516,8 @@ impl ElementsExtension {
 }
 
 impl Jet for ElementsExtension {
-    type Environment = UnchainedEnv;
-    type CJetEnvironment = UnchainedEnv;
+    type Environment = UnchainedEnv<ElementsEnv<Arc<Transaction>>>;
+    type CJetEnvironment = UnchainedEnv<ElementsEnv<Arc<Transaction>>>;
 
     fn c_jet_env(env: &Self::Environment) -> &Self::CJetEnvironment {
         // For the time being, we are goint to use the initial environment for unchained jets,
@@ -3305,13 +3309,13 @@ macro_rules! jet_wrappers {
         // Generate individual wrapper functions for each variant
         $(
             #[allow(non_snake_case)]
-            fn $variant(frame: &mut CFrameItem, arg: CFrameItem, env: &UnchainedEnv) -> bool {
-                Elements::$variant.c_jet_ptr()(frame, arg, env.elements_env.c_tx_env())
+            fn $variant(frame: &mut CFrameItem, arg: CFrameItem, env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>) -> bool {
+                Elements::$variant.c_jet_ptr()(frame, arg, env.env.c_tx_env())
             }
         )*
 
         // Generate the dispatcher function that returns the appropriate wrapper
-        fn jet_wrapper(jet: Elements) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv) -> bool {
+        fn jet_wrapper(jet: Elements) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<ElementsEnv<Arc<Transaction>>>) -> bool {
             match jet {
                 $(
                     Elements::$variant => &$variant,

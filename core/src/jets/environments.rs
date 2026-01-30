@@ -1,18 +1,19 @@
 use std::sync::Arc;
 
-use hal_simplicity::simplicity::elements::Transaction;
-use hal_simplicity::simplicity::{elements::script::Script, jet::elements::ElementsEnv};
+use hal_simplicity::simplicity::jet::elements::ElementsEnv;
 
-pub struct UnchainedEnv {
+use hal_simplicity::simplicity::elements::{Transaction, script::Script};
+
+pub type BitcoinUnchainedEnv = UnchainedEnv<()>;
+pub type ElementsUnchainedEnv = UnchainedEnv<ElementsEnv<Arc<Transaction>>>;
+
+pub struct UnchainedEnv<E> {
     pub redeem_script: Script,
-    pub elements_env: ElementsEnv<Arc<Transaction>>,
+    pub env: E,
 }
 
-impl UnchainedEnv {
-    pub fn new(redeem_script: Script, elements_env: ElementsEnv<Arc<Transaction>>) -> Self {
-        Self {
-            redeem_script,
-            elements_env,
-        }
+impl<E> UnchainedEnv<E> {
+    pub fn new(redeem_script: Script, env: E) -> Self {
+        Self { redeem_script, env }
     }
 }
