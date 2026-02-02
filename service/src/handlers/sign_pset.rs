@@ -1,7 +1,5 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
-use log::error;
-
 use hal_simplicity::{
     bitcoin::secp256k1,
     simplicity::elements::{
@@ -68,7 +66,8 @@ pub async fn sign_pset(
     // Validate request using validator
     if let Err(errors) = request.validate() {
         let error_msg = format!("Validation failed: {}", errors);
-        error!("[400] Sign PSET validation error: {}", error_msg);
+        log::error!("[400] Sign PSET validation error: {}", error_msg);
+
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse { error: error_msg }),
@@ -77,9 +76,17 @@ pub async fn sign_pset(
     }
 
     match sign_pset_internal(&state, request) {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(response) => {
+            log::info!(
+                "[200] Sign PSET successful: Tweaked Public Key {}",
+                response.public_key_hex
+            );
+
+            (StatusCode::OK, Json(response)).into_response()
+        }
         Err(e) => {
-            error!("[400] Sign PSET error: {}", e);
+            log::error!("[400] Sign PSET error: {}", e);
+
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
     }
