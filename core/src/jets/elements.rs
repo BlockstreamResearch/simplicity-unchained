@@ -31,10 +31,119 @@ macro_rules! decode_bits {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub enum ElementsTimelockDeprJets {
+    CheckLockDistance,
+    CheckLockDuration,
+    TxLockDistance,
+    TxLockDuration,
+}
+
+impl ElementsTimelockDeprJets {
+    fn cmr(&self) -> [u8; 32] {
+        match self {
+            Self::CheckLockDistance => [
+                0x62, 0x6d, 0x83, 0xc1, 0xf3, 0xc8, 0xe4, 0xf3, 0x46, 0x85, 0x87, 0x2f, 0xec, 0x51,
+                0x23, 0x06, 0x29, 0x52, 0x97, 0xe6, 0x5c, 0x96, 0x98, 0x9f, 0x97, 0xc0, 0xc1, 0xc3,
+                0xda, 0x36, 0x01, 0x5c,
+            ],
+            Self::CheckLockDuration => [
+                0xf3, 0x7a, 0x23, 0x84, 0x91, 0xd5, 0x80, 0xd5, 0x10, 0x76, 0x33, 0x11, 0xa2, 0x60,
+                0x22, 0x65, 0xa6, 0xd1, 0x72, 0x4a, 0x85, 0x61, 0x83, 0xc5, 0xd1, 0xed, 0xe4, 0xd3,
+                0xc8, 0xb3, 0x30, 0x0c,
+            ],
+            Self::TxLockDistance => [
+                0xae, 0xf9, 0x71, 0x56, 0xd1, 0x9c, 0x70, 0x7b, 0x2f, 0x1a, 0x7a, 0x95, 0x00, 0xe2,
+                0xee, 0x2d, 0x5a, 0x9b, 0x86, 0xc5, 0x84, 0xb3, 0xc1, 0x9e, 0x68, 0x48, 0x8c, 0x23,
+                0x6d, 0x24, 0x5d, 0x1f,
+            ],
+            Self::TxLockDuration => [
+                0xde, 0xee, 0x1a, 0xff, 0x56, 0xa3, 0x43, 0xa4, 0x89, 0x6e, 0xeb, 0x1d, 0x75, 0xed,
+                0xe3, 0xdb, 0xf4, 0x5c, 0x5a, 0x0e, 0xce, 0xe9, 0xa3, 0xb8, 0xca, 0x2d, 0xa9, 0xcf,
+                0xb8, 0x6c, 0x49, 0xba,
+            ],
+        }
+    }
+
+    fn source_ty(&self) -> TypeName {
+        match self {
+            Self::CheckLockDistance => Elements::CheckLockDistance.source_ty(),
+            Self::CheckLockDuration => Elements::CheckLockDuration.source_ty(),
+            Self::TxLockDistance => Elements::TxLockDistance.source_ty(),
+            Self::TxLockDuration => Elements::TxLockDuration.source_ty(),
+        }
+    }
+
+    fn target_ty(&self) -> TypeName {
+        match self {
+            Self::CheckLockDistance => Elements::CheckLockDistance.target_ty(),
+            Self::CheckLockDuration => Elements::CheckLockDuration.target_ty(),
+            Self::TxLockDistance => Elements::TxLockDistance.target_ty(),
+            Self::TxLockDuration => Elements::TxLockDuration.target_ty(),
+        }
+    }
+}
+
+impl std::fmt::Display for ElementsTimelockDeprJets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CheckLockDistance => f.write_str(&Elements::CheckLockDistance.to_string()),
+            Self::CheckLockDuration => f.write_str(&Elements::CheckLockDuration.to_string()),
+            Self::TxLockDistance => f.write_str(&Elements::TxLockDistance.to_string()),
+            Self::TxLockDuration => f.write_str(&Elements::TxLockDuration.to_string()),
+        }
+    }
+}
+
+impl ElementsTimelockDeprJets {
+    fn c_jet_ptr(&self) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv) -> bool {
+        match self {
+            Self::CheckLockDistance => &super::exec::check_lock_distance,
+            Self::CheckLockDuration => &super::exec::check_lock_duration,
+            Self::TxLockDistance => &super::exec::tx_lock_distance,
+            Self::TxLockDuration => &super::exec::tx_lock_duration,
+        }
+    }
+
+    fn encode_bits(&self) -> (u64, usize) {
+        match self {
+            ElementsTimelockDeprJets::CheckLockDistance => {
+                let val = 0b111100;
+                (val, (val.ilog2() + 1) as usize)
+            }
+            ElementsTimelockDeprJets::CheckLockDuration => {
+                let val = 0b1111010;
+                (val, (val.ilog2() + 1) as usize)
+            }
+            ElementsTimelockDeprJets::TxLockDistance => {
+                let val = 0b11110110;
+                (val, (val.ilog2() + 1) as usize)
+            }
+            ElementsTimelockDeprJets::TxLockDuration => {
+                let val = 0b111101110;
+                (val, (val.ilog2() + 1) as usize)
+            }
+        }
+    }
+}
+
+impl From<Elements> for ElementsTimelockDeprJets {
+    fn from(value: Elements) -> Self {
+        match value {
+            Elements::CheckLockDistance => Self::CheckLockDistance,
+            Elements::CheckLockDuration => Self::CheckLockDuration,
+            Elements::TxLockDistance => Self::TxLockDistance,
+            Elements::TxLockDuration => Self::TxLockDuration,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum ElementsExtension {
     Elements(Elements),
     GetOpcodeFromScript,
     GetPubkeyFromScript,
+    ElementsTimelockDeprJets(ElementsTimelockDeprJets),
 }
 
 impl ElementsExtension {
@@ -526,67 +635,58 @@ impl Jet for ElementsExtension {
     }
 
     fn cmr(&self) -> Cmr {
-        if let ElementsExtension::Elements(inner_jet) = self {
-            return inner_jet.cmr();
-        }
-
-        let bytes = match self {
-            ElementsExtension::GetOpcodeFromScript => [
+        match self {
+            ElementsExtension::Elements(
+                inner_jet @ (Elements::CheckLockDistance
+                | Elements::CheckLockDuration
+                | Elements::TxLockDistance
+                | Elements::TxLockDuration),
+            ) => Cmr::from_byte_array(ElementsTimelockDeprJets::from(*inner_jet).cmr()),
+            ElementsExtension::Elements(inner_jet) => inner_jet.cmr(),
+            ElementsExtension::GetOpcodeFromScript => Cmr::from_byte_array([
                 0xdc, 0xcc, 0xd2, 0x89, 0x59, 0x22, 0xe7, 0x5b, 0x01, 0x8b, 0x08, 0x46, 0xe5, 0xcd,
                 0x49, 0x63, 0x80, 0x8b, 0xbf, 0xd4, 0x8b, 0x47, 0x23, 0x44, 0x75, 0x60, 0x7f, 0x90,
                 0xe7, 0x0e, 0xe0, 0x32,
-            ],
-            ElementsExtension::GetPubkeyFromScript => [
+            ]),
+            ElementsExtension::GetPubkeyFromScript => Cmr::from_byte_array([
                 0x27, 0xea, 0xb0, 0x90, 0x68, 0xb0, 0x35, 0xaf, 0x61, 0x97, 0x13, 0x33, 0x5b, 0x73,
                 0xd2, 0x52, 0x0e, 0xcc, 0x02, 0x09, 0x00, 0x67, 0xc8, 0xfc, 0xca, 0xbb, 0x4d, 0x72,
                 0xa6, 0x55, 0xcd, 0xcb,
-            ],
-            _ => unreachable!(),
-        };
-
-        Cmr::from_byte_array(bytes)
+            ]),
+            ElementsExtension::ElementsTimelockDeprJets(inner_jet) => {
+                Cmr::from_byte_array(inner_jet.cmr())
+            }
+        }
     }
 
     fn source_ty(&self) -> TypeName {
-        if let ElementsExtension::Elements(inner_jet) = self {
-            return inner_jet.source_ty();
+        match self {
+            ElementsExtension::Elements(inner_jet) => inner_jet.source_ty(),
+            ElementsExtension::GetOpcodeFromScript => TypeName(b"c"),
+            ElementsExtension::GetPubkeyFromScript => TypeName(b"c"),
+            ElementsExtension::ElementsTimelockDeprJets(inner_jet) => inner_jet.source_ty(),
         }
-
-        let name = match self {
-            ElementsExtension::GetOpcodeFromScript => b"c",
-            ElementsExtension::GetPubkeyFromScript => b"c",
-            _ => unreachable!(),
-        };
-
-        TypeName(name)
     }
 
     fn target_ty(&self) -> TypeName {
-        if let ElementsExtension::Elements(inner_jet) = self {
-            return inner_jet.target_ty();
+        match self {
+            ElementsExtension::Elements(inner_jet) => inner_jet.target_ty(),
+            ElementsExtension::GetOpcodeFromScript => TypeName(b"c"),
+            ElementsExtension::GetPubkeyFromScript => TypeName(b"h"),
+            ElementsExtension::ElementsTimelockDeprJets(inner_jet) => inner_jet.target_ty(),
         }
-
-        let name = match self {
-            ElementsExtension::GetOpcodeFromScript => b"c",
-            ElementsExtension::GetPubkeyFromScript => b"h",
-            _ => unreachable!(),
-        };
-
-        TypeName(name)
     }
 
     fn encode<W: Write>(&self, w: &mut BitWriter<W>) -> std::io::Result<usize> {
-        if let ElementsExtension::Elements(inner_jet) = self {
-            return inner_jet.encode(w);
+        match self {
+            ElementsExtension::Elements(inner_jet) => inner_jet.encode(w),
+            ElementsExtension::GetOpcodeFromScript => w.write_bits_be(62, 6),
+            ElementsExtension::GetPubkeyFromScript => w.write_bits_be(126, 7),
+            ElementsExtension::ElementsTimelockDeprJets(inner_jet) => {
+                let (n, len) = inner_jet.encode_bits();
+                w.write_bits_be(n, len)
+            }
         }
-
-        let (n, len) = match self {
-            ElementsExtension::GetOpcodeFromScript => (62, 6),
-            ElementsExtension::GetPubkeyFromScript => (126, 7),
-            _ => unreachable!(),
-        };
-
-        w.write_bits_be(n, len)
     }
 
     fn decode<I: Iterator<Item = u8>>(bits: &mut BitIter<I>) -> Result<Self, decode::Error> {
@@ -3239,7 +3339,19 @@ impl Jet for ElementsExtension {
                             1 => {}
                         },
                         1 => {
-                            0 => {}, // Free path
+                            0 => {
+                                0 => { ElementsExtension::ElementsTimelockDeprJets(ElementsTimelockDeprJets::CheckLockDistance) },
+                                1 => {
+                                    0 => { ElementsExtension::ElementsTimelockDeprJets(ElementsTimelockDeprJets::CheckLockDuration) },
+                                    1 => {
+                                        0 => { ElementsExtension::ElementsTimelockDeprJets(ElementsTimelockDeprJets::TxLockDistance) },
+                                        1 => {
+                                            0 => { ElementsExtension::ElementsTimelockDeprJets(ElementsTimelockDeprJets::TxLockDuration) },
+                                            1 => { }
+                                        }
+                                    }
+                                }
+                            },
                             1 => {
                                 0 => {ElementsExtension::GetOpcodeFromScript},
                                 1 => {
@@ -3256,9 +3368,19 @@ impl Jet for ElementsExtension {
 
     fn c_jet_ptr(&self) -> &dyn Fn(&mut CFrameItem, CFrameItem, &Self::CJetEnvironment) -> bool {
         match self {
+            ElementsExtension::Elements(
+                inner_jet @ (Elements::CheckLockDistance
+                | Elements::CheckLockDuration
+                | Elements::TxLockDistance
+                | Elements::TxLockDuration),
+            ) => {
+                let tmp = ElementsTimelockDeprJets::from(*inner_jet);
+                tmp.c_jet_ptr()
+            }
             ElementsExtension::Elements(inner_jet) => jet_wrapper(*inner_jet),
             ElementsExtension::GetOpcodeFromScript => &super::exec::get_opcode_from_script,
             ElementsExtension::GetPubkeyFromScript => &super::exec::get_pubkey_from_script,
+            ElementsExtension::ElementsTimelockDeprJets(inner_jet) => inner_jet.c_jet_ptr(),
         }
     }
 
@@ -3282,6 +3404,7 @@ impl std::fmt::Display for ElementsExtension {
             ElementsExtension::Elements(inner_jet) => f.write_str(&inner_jet.to_string()),
             ElementsExtension::GetOpcodeFromScript => f.write_str("get_opcode_from_script"),
             ElementsExtension::GetPubkeyFromScript => f.write_str("get_pubkey_from_script"),
+            ElementsExtension::ElementsTimelockDeprJets(inner_jet) => inner_jet.fmt(f),
         }
     }
 }
