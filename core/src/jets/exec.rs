@@ -1,4 +1,7 @@
-use hal_simplicity::simplicity::{elements::opcodes::all::OP_PUSHBYTES_33, ffi::CFrameItem};
+use hal_simplicity::simplicity::{
+    elements::{Transaction, opcodes::all::OP_PUSHBYTES_33},
+    ffi::CFrameItem,
+};
 
 use super::environments::UnchainedEnv;
 
@@ -75,4 +78,74 @@ pub fn get_pubkey_from_script<E>(
     }
 
     true
+}
+
+pub fn check_lock_duration(_dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
+    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+
+    if tx.input.len() <= ix as usize {
+        false
+    } else {
+        let x = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
+        x <= lock_duration(tx, ix)
+    }
+}
+
+pub fn check_lock_distance(_dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
+    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+
+    if tx.input.len() <= ix as usize {
+        false
+    } else {
+        let x = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
+        x <= lock_distance(tx, ix)
+    }
+}
+
+pub fn tx_lock_duration(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedEnv) -> bool {
+    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+
+    if tx.input.len() <= ix as usize {
+        false
+    } else {
+        unsafe { rustsimplicity_0_6_write16(dst, lock_duration(tx, ix)) };
+        true
+    }
+}
+
+pub fn tx_lock_distance(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedEnv) -> bool {
+    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+
+    if tx.input.len() <= ix as usize {
+        false
+    } else {
+        unsafe { rustsimplicity_0_6_write16(dst, lock_distance(tx, ix)) };
+        true
+    }
+}
+
+fn lock_duration(tx: &Transaction, ix: u32) -> u16 {
+    assert!((ix as usize) < tx.input.len());
+
+    if (2 <= tx.version)
+        && (tx.input[ix as usize].sequence.0 < 0x80000000)
+        && (tx.input[ix as usize].sequence.0 & (1 << 22) != 0)
+    {
+        (tx.input[ix as usize].sequence.0 & 0xFFFF) as u16
+    } else {
+        0
+    }
+}
+
+fn lock_distance(tx: &Transaction, ix: u32) -> u16 {
+    assert!((ix as usize) < tx.input.len());
+
+    if (2 <= tx.version)
+        && (tx.input[ix as usize].sequence.0 < 0x80000000)
+        && (tx.input[ix as usize].sequence.0 & (1 << 22) == 0)
+    {
+        (tx.input[ix as usize].sequence.0 & 0xFFFF) as u16
+    } else {
+        0
+    }
 }
