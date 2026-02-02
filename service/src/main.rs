@@ -14,7 +14,6 @@ use axum::Router;
 use clap::Parser;
 use log::{error, info};
 use tokio::net::TcpListener;
-use tower_http::trace::{DefaultOnResponse, TraceLayer};
 
 use crate::handlers::SignerState;
 
@@ -71,10 +70,7 @@ async fn start(config_path: PathBuf) {
         }
     };
 
-    let app = Router::new().merge(handlers::routes(signer_state)).layer(
-        TraceLayer::new_for_http()
-            .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
-    );
+    let app = Router::new().merge(handlers::routes(signer_state));
 
     let bind_addr = format!("0.0.0.0:{}", config.service.port);
     info!("Starting service on {}...", bind_addr);

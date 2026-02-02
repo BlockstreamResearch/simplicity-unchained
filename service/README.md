@@ -49,7 +49,51 @@ The service exposes the following endpoints:
 }
 ```
 
-### 2. Sign PSET Endpoint
+### 2. Sign PSBT Endpoint
+
+`POST /simplicity-unchained/sign/psbt`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig Bitcoin transaction.
+
+**Request Body**:
+
+```json
+{
+  "psbt_hex": "70736274ff...",
+  "input_index": 0,
+  "redeem_script_hex": "5221...",
+  "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
+  "witness": ""
+}
+```
+
+**Request Fields**:
+
+- `psbt_hex`: The PSBT (Partially Signed Bitcoin Transaction) encoded as a hexadecimal string
+- `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
+- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation
+- `program`: The Simplicity program to execute for validation before signing
+- `witness`: The witness data required by the Simplicity program (optional, can be an empty string)
+
+**Success Response**:
+
+```json
+{
+  "psbt_hex": "70736274ff...",
+  "signature_hex": "3045022100...",
+  "public_key_hex": "02...",
+  "input_index": 0,
+  "partial_sigs_count": 1
+}
+```
+
+**Error Response**:
+
+```json
+{
+  "error": "Validation failed: ..."
+}
+```
+
+### 3. Sign PSET Endpoint
 
 `POST /simplicity-unchained/sign/pset`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig transaction.
 **Request Body**:
@@ -92,7 +136,7 @@ The service exposes the following endpoints:
 }
 ```
 
-### 3. Tweak Endpoint
+### 4. Tweak Endpoint
 
 `POST /simplicity-unchained/tweak`: Accepts a Simplicity program, computes its CMR (commitment Merkle root), and returns the tweaked public key using taproot key tweaking.
 
@@ -100,13 +144,15 @@ The service exposes the following endpoints:
 
 ```json
 {
-  "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA"
+  "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
+  "jet_env": "elements"
 }
 ```
 
 **Request Fields**:
 
 - `program`: The Simplicity program to compute the CMR from (must be a non-empty string)
+- `jet_env`: The jet environment to use, either `elements` or `bitcoin`
 
 **Success Response**:
 
