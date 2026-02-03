@@ -72,6 +72,9 @@ pub fn get_pubkey_from_script(dst: &mut CFrameItem, src: CFrameItem, env: &Uncha
     true
 }
 
+// Changes ported from <https://github.com/BlockstreamResearch/simplicity/pull/326/changes/a97e57cd96f1ae110d75429043393fca10702a3e>
+
+/// 2^16 |- ONE
 pub fn check_lock_duration(_dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
     let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
 
@@ -83,6 +86,7 @@ pub fn check_lock_duration(_dst: &mut CFrameItem, src: CFrameItem, env: &Unchain
     }
 }
 
+/// 2^16 |- ONE
 pub fn check_lock_distance(_dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
     let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
 
@@ -94,6 +98,7 @@ pub fn check_lock_distance(_dst: &mut CFrameItem, src: CFrameItem, env: &Unchain
     }
 }
 
+/// ONE |- 2^16
 pub fn tx_lock_duration(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedEnv) -> bool {
     let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
 
@@ -105,6 +110,7 @@ pub fn tx_lock_duration(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedE
     }
 }
 
+/// ONE |- 2^16
 pub fn tx_lock_distance(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedEnv) -> bool {
     let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
 
