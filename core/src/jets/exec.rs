@@ -3,6 +3,8 @@ use hal_simplicity::simplicity::{
     ffi::CFrameItem,
 };
 
+use crate::jets::environments::ElementsUnchainedEnv;
+
 use super::environments::UnchainedEnv;
 
 #[allow(unused)]
@@ -80,8 +82,11 @@ pub fn get_pubkey_from_script<E>(
     true
 }
 
-pub fn check_lock_duration(_dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
-    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+// Changes ported from <https://github.com/BlockstreamResearch/simplicity/pull/326/changes/a97e57cd96f1ae110d75429043393fca10702a3e>
+
+/// 2^16 |- ONE
+pub fn check_lock_duration(_dst: &mut CFrameItem, src: CFrameItem, env: &ElementsUnchainedEnv) -> bool {
+    let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
         false
@@ -91,8 +96,9 @@ pub fn check_lock_duration(_dst: &mut CFrameItem, src: CFrameItem, env: &Unchain
     }
 }
 
-pub fn check_lock_distance(_dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv) -> bool {
-    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+/// 2^16 |- ONE
+pub fn check_lock_distance(_dst: &mut CFrameItem, src: CFrameItem, env: &ElementsUnchainedEnv) -> bool {
+    let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
         false
@@ -102,8 +108,9 @@ pub fn check_lock_distance(_dst: &mut CFrameItem, src: CFrameItem, env: &Unchain
     }
 }
 
-pub fn tx_lock_duration(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedEnv) -> bool {
-    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+/// ONE |- 2^16
+pub fn tx_lock_duration(dst: &mut CFrameItem, _src: CFrameItem, env: &ElementsUnchainedEnv) -> bool {
+    let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
         false
@@ -113,8 +120,9 @@ pub fn tx_lock_duration(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedE
     }
 }
 
-pub fn tx_lock_distance(dst: &mut CFrameItem, _src: CFrameItem, env: &UnchainedEnv) -> bool {
-    let (tx, ix) = (env.elements_env.tx(), env.elements_env.ix());
+/// ONE |- 2^16
+pub fn tx_lock_distance(dst: &mut CFrameItem, _src: CFrameItem, env: &ElementsUnchainedEnv) -> bool {
+    let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
         false
