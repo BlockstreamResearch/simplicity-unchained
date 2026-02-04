@@ -6,7 +6,7 @@ mod validation;
 use cli::{Cli, Commands};
 use config::Config;
 
-use simplicity_unchained_core::Network;
+use simplicity_unchained_core::{BitcoinNetwork, ElementsNetwork};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -14,7 +14,8 @@ use axum::Router;
 use clap::Parser;
 use log::{error, info};
 use tokio::net::TcpListener;
-use tower_http::trace::{DefaultOnResponse, TraceLayer};
+
+use crate::handlers::SignerState;
 
 #[tokio::main]
 async fn main() {
@@ -40,7 +41,7 @@ async fn start(config_path: PathBuf) {
         }
     };
 
-    let network = match Network::from_str(&config.service.network) {
+    let elements_network = match ElementsNetwork::from_str(&config.service.elements_network) {
         Ok(network) => network,
         Err(e) => {
             error!("Failed to parse network: {}", e);
@@ -48,8 +49,20 @@ async fn start(config_path: PathBuf) {
         }
     };
 
+    let bitcoin_network = match BitcoinNetwork::from_str(&config.service.bitcoin_network) {
+        Ok(network) => network,
+        Err(e) => {
+            error!("Failed to parse bitcoin network: {}", e);
+            return;
+        }
+    };
+
     // Initialize signer state from config
-    let signer_state = match handlers::sign::SignerState::new(&config.service.private_key, network) {
+    let signer_state = match SignerState::new(
+        &config.service.private_key,
+        elements_network,
+        bitcoin_network,
+    ) {
         Ok(state) => state,
         Err(e) => {
             error!("Failed to initialize signer state: {}", e);
@@ -57,10 +70,7 @@ async fn start(config_path: PathBuf) {
         }
     };
 
-    let app = Router::new().merge(handlers::routes(signer_state)).layer(
-        TraceLayer::new_for_http()
-            .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
-    );
+    let app = Router::new().merge(handlers::routes(signer_state));
 
     let bind_addr = format!("0.0.0.0:{}", config.service.port);
     info!("Starting service on {}...", bind_addr);

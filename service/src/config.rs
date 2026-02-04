@@ -18,7 +18,8 @@ pub struct Config {
 pub struct ServiceConfig {
     pub port: u16,
     pub private_key: String,
-    pub network: String,
+    pub elements_network: String,
+    pub bitcoin_network: String,
 }
 
 impl Config {

@@ -3,60 +3,33 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use hal_simplicity::{
     bitcoin::secp256k1,
     simplicity::elements::{
-        self,
         schnorr::{TapTweak, UntweakedKeypair},
         taproot::TapNodeHash,
     },
 };
 
-use elements::{
-    EcdsaSighashType,
-    bitcoin::PublicKey,
-    encode::{deserialize, serialize},
-    hashes::Hash,
-    pset::PartiallySignedTransaction,
-    script::Script,
-    secp256k1_zkp::{All, Message, Secp256k1, SecretKey},
-    sighash::SighashCache,
+use hal_simplicity::simplicity::bitcoin::{
+    EcdsaSighashType, PublicKey, hashes::Hash, psbt::Psbt, script::Script, sighash::SighashCache,
 };
+
+use hal_simplicity::simplicity::elements::secp256k1_zkp::Message;
+
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
 use validator::Validate;
 
-use simplicity_unchained_core::{Network, runner::SimplicityRunner};
+use simplicity_unchained_core::runner::SimplicityRunner;
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
 
-#[derive(Clone, Debug)]
-pub struct SignerState {
-    pub secret_key: SecretKey,
-    pub secp: Arc<Secp256k1<All>>,
-    pub network: Network,
-}
-
-impl SignerState {
-    pub fn new(secret_key_hex: &str, network: Network) -> Result<Self, String> {
-        let secret_key_bytes =
-            hex::decode(secret_key_hex).map_err(|e| format!("Invalid private key hex: {}", e))?;
-
-        let secret_key = SecretKey::from_slice(&secret_key_bytes)
-            .map_err(|e| format!("Invalid private key: {}", e))?;
-
-        Ok(Self {
-            secret_key,
-            secp: Arc::new(Secp256k1::new()),
-            network,
-        })
-    }
-}
+use super::SignerState;
 
 #[derive(Debug, Deserialize, Validate)]
-pub struct SignPsetRequest {
+pub struct SignPsbtRequest {
     #[validate(length(min = 1), custom(function = "validation::validate_hex"))]
-    pub pset_hex: String,
+    pub psbt_hex: String,
 
-    // TODO(ivanlele): it looks bad, but cargo check yells warning which we can't silence with #[allow], so leave it as is for now
     #[validate(range(min = 0, max = {
         u16::MAX as usize
     }))]
@@ -72,66 +45,78 @@ pub struct SignPsetRequest {
 }
 
 #[derive(Debug, Serialize)]
-pub struct SignPsetResponse {
-    pub pset_hex: String,
+pub struct SignPsbtResponse {
+    pub psbt_hex: String,
     pub signature_hex: String,
     pub public_key_hex: String,
     pub input_index: usize,
     pub partial_sigs_count: usize,
 }
 
-pub async fn sign_pset(
+pub async fn sign_psbt(
     State(state): State<SignerState>,
-    Json(request): Json<SignPsetRequest>,
+    Json(request): Json<SignPsbtRequest>,
 ) -> impl IntoResponse {
     // Validate request using validator
     if let Err(errors) = request.validate() {
+        let error_msg = format!("Validation failed: {}", errors);
+        log::error!("[400] Sign PSBT validation error: {}", error_msg);
+
         return (
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: format!("Validation failed: {}", errors),
-            }),
+            Json(ErrorResponse { error: error_msg }),
         )
             .into_response();
     }
 
-    match sign_pset_internal(&state, request) {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
+    match sign_psbt_internal(&state, request) {
+        Ok(response) => {
+            log::info!(
+                "[200] Sign PSBT successful: Tweaked Public Key {}",
+                response.public_key_hex
+            );
+
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Err(e) => {
+            log::error!("[400] Sign PSBT error: {}", e);
+
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
+        }
     }
 }
 
-fn sign_pset_internal(
+fn sign_psbt_internal(
     state: &SignerState,
-    request: SignPsetRequest,
-) -> Result<SignPsetResponse, String> {
-    let pset_bytes =
-        hex::decode(&request.pset_hex).map_err(|e| format!("Failed to decode PSET hex: {}", e))?;
+    request: SignPsbtRequest,
+) -> Result<SignPsbtResponse, String> {
+    let psbt_bytes =
+        hex::decode(&request.psbt_hex).map_err(|e| format!("Failed to decode PSBT hex: {}", e))?;
 
-    let mut pset: PartiallySignedTransaction =
-        deserialize(&pset_bytes).map_err(|e| format!("Failed to deserialize PSET: {}", e))?;
+    let mut psbt: Psbt =
+        Psbt::deserialize(&psbt_bytes).map_err(|e| format!("Failed to deserialize PSBT: {}", e))?;
 
-    if request.input_index >= pset.inputs().len() {
+    if request.input_index >= psbt.inputs.len() {
         return Err(format!(
-            "Input index {} out of bounds (PSET has {} inputs)",
+            "Input index {} out of bounds (PSBT has {} inputs)",
             request.input_index,
-            pset.inputs().len()
+            psbt.inputs.len()
         ));
     }
 
     let redeem_script_bytes = hex::decode(&request.redeem_script_hex)
         .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
 
-    let redeem_script = Script::from(redeem_script_bytes);
+    let redeem_script = Script::from_bytes(&redeem_script_bytes).to_owned();
 
     // Validate with Simplicity runner before signing
-    let cmr = SimplicityRunner::execute(
+    let cmr = SimplicityRunner::execute_bitcoin(
         &request.program,
         request.witness.as_deref(),
         request.input_index,
-        &pset,
-        redeem_script.clone(),
-        state.network.clone(),
+        &psbt,
+        hal_simplicity::simplicity::elements::Script::from(redeem_script_bytes),
+        state.bitcoin_network.clone(),
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
@@ -148,25 +133,25 @@ fn sign_pset_internal(
         tweaked_parity,
     ));
 
-    let tx = pset
-        .extract_tx()
-        .map_err(|e| format!("Failed to extract transaction: {}", e))?;
-
-    let pset_input = &pset.inputs()[request.input_index];
-    let prev_value = pset_input
+    let psbt_input = &psbt.inputs[request.input_index];
+    let prev_value = psbt_input
         .witness_utxo
         .as_ref()
         .ok_or_else(|| format!("Missing witness UTXO for input {}", request.input_index))?
         .value;
 
+    let tx = psbt.clone().extract_tx_unchecked_fee_rate();
+
     // Compute sighash for P2WSH (SegWit v0)
     let mut sighash_cache = SighashCache::new(&tx);
-    let sighash = sighash_cache.segwitv0_sighash(
-        request.input_index,
-        &redeem_script,
-        prev_value,
-        EcdsaSighashType::All,
-    );
+    let sighash = sighash_cache
+        .p2wsh_signature_hash(
+            request.input_index,
+            &redeem_script,
+            prev_value,
+            EcdsaSighashType::All,
+        )
+        .map_err(|e| format!("Failed to compute sighash: {}", e))?;
 
     // Sign the sighash
     let msg = Message::from_digest(sighash.to_byte_array());
@@ -175,19 +160,25 @@ fn sign_pset_internal(
         .sign_ecdsa(&msg, &tweaked_keypair.to_inner().secret_key());
 
     let mut sig_bytes = signature.serialize_der().to_vec();
-    sig_bytes.push(EcdsaSighashType::All.as_u32() as u8);
+    sig_bytes.push(EcdsaSighashType::All.to_u32() as u8);
 
-    let input = &mut pset.inputs_mut()[request.input_index];
-    input.partial_sigs.insert(public_key, sig_bytes.clone());
+    // Convert to bitcoin's Signature type for PSBT
+    let bitcoin_sig = hal_simplicity::simplicity::bitcoin::ecdsa::Signature {
+        signature,
+        sighash_type: EcdsaSighashType::All,
+    };
+
+    let input = &mut psbt.inputs[request.input_index];
+    input.partial_sigs.insert(public_key, bitcoin_sig);
 
     if input.witness_script.is_none() {
-        input.witness_script = Some(redeem_script.clone());
+        input.witness_script = Some(redeem_script);
     }
 
-    let partial_sigs_count = pset.inputs()[request.input_index].partial_sigs.len();
+    let partial_sigs_count = psbt.inputs[request.input_index].partial_sigs.len();
 
-    Ok(SignPsetResponse {
-        pset_hex: hex::encode(serialize(&pset)),
+    Ok(SignPsbtResponse {
+        psbt_hex: hex::encode(psbt.serialize()),
         signature_hex: hex::encode(&sig_bytes),
         public_key_hex: hex::encode(public_key.to_bytes()),
         input_index: request.input_index,
@@ -197,43 +188,48 @@ fn sign_pset_internal(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use elements::{
-        OutPoint, Transaction, TxIn, TxInWitness, TxOut, Txid,
-        confidential::{Asset, Value},
-        opcodes::all::OP_CHECKMULTISIG,
-        pset::PartiallySignedTransaction,
-        script::Builder as ScriptBuilder,
-        secp256k1_zkp::Secp256k1,
-    };
     use hal_simplicity::hal_simplicity::Program;
+    use hal_simplicity::simplicity::bitcoin::{
+        NetworkKind, OutPoint, PrivateKey, Transaction, TxIn, TxOut, Txid,
+        opcodes::all::OP_CHECKMULTISIG,
+        psbt::Psbt,
+        script::{Builder as ScriptBuilder, ScriptBuf},
+    };
+    use hal_simplicity::simplicity::elements::{
+        secp256k1_zkp::Secp256k1, secp256k1_zkp::SecretKey,
+    };
+    use simplicity_unchained_core::BitcoinNetwork;
     use std::str::FromStr;
 
-    use simplicity_unchained_core::{Network, jets::unchained::ElementsExtension};
+    use simplicity_unchained_core::{ElementsNetwork, jets::bitcoin::CoreExtension};
 
     fn create_test_signer_state() -> SignerState {
         let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
         SignerState {
             secret_key,
             secp: Arc::new(Secp256k1::new()),
-            network: simplicity_unchained_core::Network::LiquidTestnet,
+            elements_network: simplicity_unchained_core::ElementsNetwork::LiquidTestnet,
+            bitcoin_network: simplicity_unchained_core::BitcoinNetwork::Testnet,
         }
     }
 
-    fn create_2of2_multisig_script(state: &SignerState, key2: &SecretKey) -> Script {
+    fn create_2of2_multisig_script(state: &SignerState, key2: &SecretKey) -> ScriptBuf {
         let pubkey1 = PublicKey::from_private_key(
             &*state.secp,
-            &elements::bitcoin::PrivateKey {
+            &PrivateKey {
                 compressed: true,
-                network: elements::bitcoin::NetworkKind::Main,
+                network: NetworkKind::Test,
                 inner: state.secret_key,
             },
         );
         let pubkey2 = PublicKey::from_private_key(
             &*state.secp,
-            &elements::bitcoin::PrivateKey {
+            &PrivateKey {
                 compressed: true,
-                network: elements::bitcoin::NetworkKind::Main,
+                network: NetworkKind::Test,
                 inner: *key2,
             },
         );
@@ -250,72 +246,64 @@ mod tests {
     fn create_test_transaction() -> Transaction {
         let prev_txid =
             Txid::from_str("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
-                .expect("valid txid");
+                .unwrap();
 
         Transaction {
-            version: 2,
-            lock_time: elements::LockTime::ZERO,
+            version: hal_simplicity::simplicity::bitcoin::transaction::Version::TWO,
+            lock_time: hal_simplicity::simplicity::bitcoin::absolute::LockTime::ZERO,
             input: vec![TxIn {
                 previous_output: OutPoint {
                     txid: prev_txid,
                     vout: 0,
                 },
-                is_pegin: false,
-                script_sig: Script::new(),
-                sequence: elements::Sequence::MAX,
-                asset_issuance: Default::default(),
-                witness: TxInWitness::default(),
+                script_sig: ScriptBuf::new(),
+                sequence: hal_simplicity::simplicity::bitcoin::Sequence::MAX,
+                witness: Default::default(),
             }],
             output: vec![TxOut {
-                asset: Asset::Explicit(elements::AssetId::from_slice(&[0; 32]).unwrap()),
-                value: Value::Explicit(100_000),
-                nonce: elements::confidential::Nonce::Null,
-                script_pubkey: Script::new(),
-                witness: Default::default(),
+                value: hal_simplicity::simplicity::bitcoin::Amount::from_sat(50_000),
+                script_pubkey: ScriptBuf::new(),
             }],
         }
     }
 
-    fn create_test_pset(tx: Transaction) -> PartiallySignedTransaction {
-        let mut pset = PartiallySignedTransaction::from_tx(tx);
+    fn create_test_psbt(tx: Transaction) -> Psbt {
+        let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
 
         // Add witness_utxo to the first input (required for SegWit v0)
-        pset.inputs_mut()[0].witness_utxo = Some(TxOut {
-            asset: Asset::Explicit(elements::AssetId::from_slice(&[0; 32]).unwrap()),
-            value: Value::Explicit(100_000),
-            nonce: elements::confidential::Nonce::Null,
-            script_pubkey: Script::new(),
-            witness: Default::default(),
+        psbt.inputs[0].witness_utxo = Some(TxOut {
+            value: hal_simplicity::simplicity::bitcoin::Amount::from_sat(100_000),
+            script_pubkey: ScriptBuf::new(),
         });
 
-        pset
+        psbt
     }
 
     #[test]
-    fn test_sign_pset_internal_success() {
+    fn test_sign_psbt_internal_success() {
         let state = create_test_signer_state();
         let key2 = SecretKey::from_slice(&[0xab; 32]).expect("valid secret key");
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx);
+        let psbt = create_test_psbt(tx);
 
-        let pset_bytes = serialize(&pset);
-        let pset_hex = hex::encode(&pset_bytes);
+        let psbt_bytes = psbt.serialize();
+        let psbt_hex = hex::encode(&psbt_bytes);
 
-        let request = SignPsetRequest {
-            pset_hex,
+        let request = SignPsbtRequest {
+            psbt_hex,
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
 
-        let result = sign_pset_internal(&state, request);
+        let result = sign_psbt_internal(&state, request);
         assert!(result.is_ok());
 
         let response = result.unwrap();
-        assert!(!response.pset_hex.is_empty());
+        assert!(!response.psbt_hex.is_empty());
         assert!(!response.signature_hex.is_empty());
         assert!(!response.public_key_hex.is_empty());
         assert_eq!(response.input_index, 0);
@@ -326,143 +314,138 @@ mod tests {
         assert!(sig_bytes.len() > 0);
         assert_eq!(
             *sig_bytes.last().unwrap(),
-            EcdsaSighashType::All.as_u32() as u8
+            EcdsaSighashType::All.to_u32() as u8
         );
 
-        // Verify we can decode the signed PSET
-        let signed_pset_bytes = hex::decode(&response.pset_hex).unwrap();
-        let signed_pset: PartiallySignedTransaction = deserialize(&signed_pset_bytes).unwrap();
+        // Verify we can decode the signed PSBT
+        let signed_psbt_bytes = hex::decode(&response.psbt_hex).unwrap();
+        let signed_psbt: Psbt = Psbt::deserialize(&signed_psbt_bytes).unwrap();
 
-        // Verify the signature was added to the PSET
-        assert!(!signed_pset.inputs()[0].partial_sigs.is_empty());
+        // Verify the signature was added to the PSBT
+        assert!(!signed_psbt.inputs[0].partial_sigs.is_empty());
 
         // Verify the witness_script was added
-        assert!(signed_pset.inputs()[0].witness_script.is_some());
+        assert!(signed_psbt.inputs[0].witness_script.is_some());
     }
 
     #[test]
-    fn test_sign_pset_internal_invalid_hex() {
+    fn test_sign_psbt_internal_invalid_hex() {
         let state = create_test_signer_state();
 
-        let request = SignPsetRequest {
-            pset_hex: "invalid_hex!!!".to_string(),
+        let request = SignPsbtRequest {
+            psbt_hex: "invalid_hex!!!".to_string(),
             input_index: 0,
             redeem_script_hex: "".to_string(),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
 
-        let result = sign_pset_internal(&state, request);
+        let result = sign_psbt_internal(&state, request);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to decode PSET hex"));
+        assert!(result.unwrap_err().contains("Failed to decode PSBT hex"));
     }
 
     #[test]
-    fn test_sign_pset_internal_invalid_pset_data() {
+    fn test_sign_psbt_internal_invalid_psbt_data() {
         let state = create_test_signer_state();
 
-        // Valid hex but invalid PSET data
-        let invalid_data = hex::encode(b"not a valid pset");
+        // Valid hex but invalid PSBT data
+        let invalid_data = hex::encode(b"not a valid psbt");
 
-        let request = SignPsetRequest {
-            pset_hex: invalid_data,
+        let request = SignPsbtRequest {
+            psbt_hex: invalid_data,
             input_index: 0,
             redeem_script_hex: "".to_string(),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
 
-        let result = sign_pset_internal(&state, request);
+        let result = sign_psbt_internal(&state, request);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to deserialize PSET"));
+        assert!(result.unwrap_err().contains("Failed to deserialize PSBT"));
     }
 
     #[test]
-    fn test_sign_pset_internal_input_index_out_of_bounds() {
+    fn test_sign_psbt_internal_input_index_out_of_bounds() {
         let state = create_test_signer_state();
         let key2 = SecretKey::from_slice(&[0xab; 32]).expect("valid secret key");
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx);
+        let psbt = create_test_psbt(tx);
 
-        let pset_bytes = serialize(&pset);
-        let pset_hex = hex::encode(&pset_bytes);
+        let psbt_bytes = psbt.serialize();
+        let psbt_hex = hex::encode(&psbt_bytes);
 
-        let request = SignPsetRequest {
-            pset_hex,
-            input_index: 999, // Out of bounds
+        let request = SignPsbtRequest {
+            psbt_hex,
+            input_index: 99, // Out of bounds
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: None,
+            witness: Some("".to_string()),
         };
 
-        let result = sign_pset_internal(&state, request);
+        let result = sign_psbt_internal(&state, request);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Input index 999 out of bounds")
-        );
+        assert!(result.unwrap_err().contains("Input index 99 out of bounds"));
     }
 
     #[test]
-    fn test_sign_pset_internal_invalid_redeem_script() {
+    fn test_sign_psbt_internal_invalid_redeem_script() {
         let state = create_test_signer_state();
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx);
+        let psbt = create_test_psbt(tx);
 
-        let pset_bytes = serialize(&pset);
-        let pset_hex = hex::encode(&pset_bytes);
+        let psbt_bytes = psbt.serialize();
+        let psbt_hex = hex::encode(&psbt_bytes);
 
-        let request = SignPsetRequest {
-            pset_hex,
+        let request = SignPsbtRequest {
+            psbt_hex,
             input_index: 0,
-            redeem_script_hex: "invalid_hex!!!".to_string(),
+            redeem_script_hex: "invalid!!!".to_string(),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: None,
+            witness: Some("".to_string()),
         };
 
-        let result = sign_pset_internal(&state, request);
+        let result = sign_psbt_internal(&state, request);
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
-                .contains("Failed to decode redeem script")
+                .contains("Failed to decode redeem script hex")
         );
     }
 
     #[test]
-    fn test_sign_pset_internal_signature_verification() {
+    fn test_sign_psbt_internal_signature_verification() {
         let state = create_test_signer_state();
         let key2 = SecretKey::from_slice(&[0xab; 32]).expect("valid secret key");
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx.clone());
+        let psbt = create_test_psbt(tx.clone());
 
-        let pset_bytes = serialize(&pset);
-        let pset_hex = hex::encode(&pset_bytes);
+        let psbt_bytes = psbt.serialize();
+        let psbt_hex = hex::encode(&psbt_bytes);
 
         let program = "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string();
 
-        let request = SignPsetRequest {
-            pset_hex,
+        let request = SignPsbtRequest {
+            psbt_hex,
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: program.clone(),
             witness: Some("".to_string()),
         };
 
-        let result = sign_pset_internal(&state, request).unwrap();
+        let result = sign_psbt_internal(&state, request).unwrap();
 
-        // Decode the signed PSET
-        let signed_pset_bytes = hex::decode(&result.pset_hex).unwrap();
-        let signed_pset: PartiallySignedTransaction = deserialize(&signed_pset_bytes).unwrap();
+        // Decode the signed PSBT
+        let signed_psbt_bytes = hex::decode(&result.psbt_hex).unwrap();
+        let signed_psbt: Psbt = Psbt::deserialize(&signed_psbt_bytes).unwrap();
 
-        let program =
-            Program::<ElementsExtension>::from_str(&program, Some("")).expect("valid program");
+        let program = Program::<CoreExtension>::from_str(&program, Some("")).unwrap();
 
         let cmr = program.commit_prog().cmr();
 
@@ -479,52 +462,47 @@ mod tests {
             tweaked_parity,
         ));
 
-        let sig_bytes = signed_pset.inputs()[0]
-            .partial_sigs
-            .get(&public_key)
-            .expect("signature should be present");
+        let sig_bytes = signed_psbt.inputs[0].partial_sigs.get(&public_key).unwrap();
 
         // Verify signature format
-        assert!(sig_bytes.len() > 1);
-        assert_eq!(
-            *sig_bytes.last().unwrap(),
-            EcdsaSighashType::All.as_u32() as u8
-        );
+        assert_eq!(sig_bytes.sighash_type, EcdsaSighashType::All);
 
         // Compute the expected sighash for SegWit v0
-        let pset_input = &signed_pset.inputs()[0];
-        let prev_value = pset_input.witness_utxo.as_ref().unwrap().value;
+        let psbt_input = &signed_psbt.inputs[0];
+        let prev_value = psbt_input.witness_utxo.as_ref().unwrap().value;
 
         let mut sighash_cache = SighashCache::new(&tx);
-        let sighash =
-            sighash_cache.segwitv0_sighash(0, &redeem_script, prev_value, EcdsaSighashType::All);
+        let sighash = sighash_cache
+            .p2wsh_signature_hash(0, &redeem_script, prev_value, EcdsaSighashType::All)
+            .unwrap();
 
         // Verify the signature is valid for the sighash
         let msg = Message::from_digest(sighash.to_byte_array());
-        let sig_without_sighash_type = &sig_bytes[..sig_bytes.len() - 1];
-        let signature =
-            elements::secp256k1_zkp::ecdsa::Signature::from_der(sig_without_sighash_type)
-                .expect("valid DER signature");
-
-        let verification =
-            state
-                .secp
-                .verify_ecdsa(&msg, &signature, &tweaked_keypair.to_inner().public_key());
-
+        let verification = state
+            .secp
+            .verify_ecdsa(&msg, &sig_bytes.signature, &public_key.inner);
         assert!(verification.is_ok());
     }
 
     #[test]
     fn test_signer_state_new_valid_key() {
         let secret_key_hex = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
-        let result = SignerState::new(secret_key_hex, Network::LiquidTestnet);
+        let result = SignerState::new(
+            secret_key_hex,
+            ElementsNetwork::LiquidTestnet,
+            BitcoinNetwork::Testnet,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_signer_state_new_invalid_hex() {
         let secret_key_hex = "not_valid_hex";
-        let result = SignerState::new(secret_key_hex, Network::LiquidTestnet);
+        let result = SignerState::new(
+            secret_key_hex,
+            ElementsNetwork::LiquidTestnet,
+            BitcoinNetwork::Testnet,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid private key hex"));
     }
@@ -532,34 +510,38 @@ mod tests {
     #[test]
     fn test_signer_state_new_invalid_key_length() {
         let secret_key_hex = "cdcdcd"; // Too short
-        let result = SignerState::new(secret_key_hex, Network::LiquidTestnet);
+        let result = SignerState::new(
+            secret_key_hex,
+            ElementsNetwork::LiquidTestnet,
+            BitcoinNetwork::Testnet,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid private key"));
     }
 
     #[test]
-    fn test_sign_pset_request_validation() {
+    fn test_sign_psbt_request_validation() {
         let state = create_test_signer_state();
         let key2 = SecretKey::from_slice(&[0xab; 32]).expect("valid secret key");
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         // Valid request
-        let valid_request = SignPsetRequest {
-            pset_hex: "0000000000".to_string(),
+        let valid_request = SignPsbtRequest {
+            psbt_hex: "70736574ff".to_string(), // Some valid hex
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: None,
+            witness: Some("".to_string()),
         };
         assert!(valid_request.validate().is_ok());
 
-        // Empty pset_hex should fail
-        let invalid_request = SignPsetRequest {
-            pset_hex: "".to_string(),
+        // Empty psbt_hex should fail
+        let invalid_request = SignPsbtRequest {
+            psbt_hex: "".to_string(),
             input_index: 0,
             redeem_script_hex: hex::encode(redeem_script.as_bytes()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
-            witness: None,
+            witness: Some("".to_string()),
         };
         assert!(invalid_request.validate().is_err());
     }

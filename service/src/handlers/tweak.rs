@@ -14,14 +14,22 @@ use elements::{bitcoin::PublicKey, hashes::Hash};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use simplicity_unchained_core::jets::unchained::ElementsExtension;
+use simplicity_unchained_core::jets::{bitcoin::CoreExtension, elements::ElementsExtension};
 
-use crate::handlers::{ErrorResponse, sign::SignerState};
+use crate::handlers::{ErrorResponse, SignerState};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JetEnvKind {
+    Elements,
+    Bitcoin,
+}
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct TweakRequest {
     #[validate(length(min = 1))]
     pub program: String,
+    pub jet_env: Option<JetEnvKind>,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,18 +44,31 @@ pub async fn get_tweaked_key(
 ) -> impl IntoResponse {
     // Validate request using validator
     if let Err(errors) = request.validate() {
+        let error_msg = format!("Validation failed: {}", errors);
+        log::error!("[400] Tweak validation error: {}", error_msg);
+
         return (
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: format!("Validation failed: {}", errors),
-            }),
+            Json(ErrorResponse { error: error_msg }),
         )
             .into_response();
     }
 
     match get_tweaked_key_internal(&state, request) {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
+        Ok(response) => {
+            log::info!(
+                "[200] Tweak successful: CMR {}, Tweaked Public Key {}",
+                response.cmr_hex,
+                response.tweaked_public_key_hex
+            );
+
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Err(e) => {
+            log::error!("[400] Tweak error: {}", e);
+
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
+        }
     }
 }
 
@@ -56,10 +77,20 @@ fn get_tweaked_key_internal(
     request: TweakRequest,
 ) -> Result<TweakResponse, String> {
     // Parse Simplicity program and get CMR from commitment
-    let program = Program::<ElementsExtension>::from_str(&request.program, None)
-        .map_err(|e| format!("Failed to parse program: {}", e))?;
+    let cmr = match &request.jet_env {
+        Some(JetEnvKind::Bitcoin) => {
+            let program = Program::<CoreExtension>::from_str(&request.program, None)
+                .map_err(|e| format!("Failed to parse program: {}", e))?;
 
-    let cmr = program.commit_prog().cmr();
+            program.commit_prog().cmr()
+        }
+        _ => {
+            let program = Program::<ElementsExtension>::from_str(&request.program, None)
+                .map_err(|e| format!("Failed to parse program: {}", e))?;
+
+            program.commit_prog().cmr()
+        }
+    };
 
     // Create untweaked keypair and tweak it with the CMR
     let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
@@ -87,14 +118,15 @@ mod tests {
     use elements::secp256k1_zkp::{Secp256k1, SecretKey};
     use std::sync::Arc;
 
-    use simplicity_unchained_core::Network;
+    use simplicity_unchained_core::{BitcoinNetwork, ElementsNetwork};
 
     fn create_test_signer_state() -> SignerState {
         let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
         SignerState {
             secret_key,
             secp: Arc::new(Secp256k1::new()),
-            network: Network::LiquidTestnet,
+            elements_network: ElementsNetwork::LiquidTestnet,
+            bitcoin_network: BitcoinNetwork::Testnet,
         }
     }
 
@@ -104,6 +136,7 @@ mod tests {
 
         let request = TweakRequest {
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
+            jet_env: None,
         };
 
         let result = get_tweaked_key_internal(&state, request);
@@ -126,6 +159,7 @@ mod tests {
 
         let request = TweakRequest {
             program: "invalid_program".to_string(),
+            jet_env: None,
         };
 
         let result = get_tweaked_key_internal(&state, request);
@@ -138,12 +172,14 @@ mod tests {
         // Valid request
         let valid_request = TweakRequest {
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
+            jet_env: None,
         };
         assert!(valid_request.validate().is_ok());
 
         // Empty program should fail
         let invalid_request = TweakRequest {
             program: "".to_string(),
+            jet_env: None,
         };
         assert!(invalid_request.validate().is_err());
     }
@@ -158,6 +194,7 @@ mod tests {
 
         let request = TweakRequest {
             program: program.clone(),
+            jet_env: None,
         };
 
         let result = get_tweaked_key_internal(&state, request).unwrap();
