@@ -1,0 +1,12 @@
+include:
+  - template: Auto-DevOps.gitlab-ci.yml
+
+build:
+  tags:
+    - cloud
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - unknown_failure
+      - stuck_or_timeout_failure
