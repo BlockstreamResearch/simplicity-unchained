@@ -11,6 +11,8 @@ use hal_simplicity::simplicity::{BitIter, BitWriter, decode};
 use hal_simplicity::simplicity::elements::Transaction;
 use hal_simplicity::simplicity::jet::elements::ElementsEnv;
 
+use crate::jets::environments::ElementsUnchainedEnv;
+
 use super::environments::UnchainedEnv;
 
 // Local version of decode_bits macro that accepts expressions instead of just paths
@@ -95,7 +97,7 @@ impl std::fmt::Display for ElementsTimelockDeprJets {
 }
 
 impl ElementsTimelockDeprJets {
-    fn c_jet_ptr(&self) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv) -> bool {
+    fn c_jet_ptr(&self) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &ElementsUnchainedEnv) -> bool {
         match self {
             Self::CheckLockDistance => &super::exec::check_lock_distance,
             Self::CheckLockDuration => &super::exec::check_lock_duration,
