@@ -97,7 +97,9 @@ impl std::fmt::Display for ElementsTimelockDeprJets {
 }
 
 impl ElementsTimelockDeprJets {
-    fn c_jet_ptr(&self) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &ElementsUnchainedEnv) -> bool {
+    fn c_jet_ptr(
+        &self,
+    ) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &ElementsUnchainedEnv) -> bool {
         match self {
             Self::CheckLockDistance => &super::exec::check_lock_distance,
             Self::CheckLockDuration => &super::exec::check_lock_duration,
