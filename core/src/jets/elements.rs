@@ -3256,6 +3256,14 @@ impl Jet for ElementsExtension {
 
     fn c_jet_ptr(&self) -> &dyn Fn(&mut CFrameItem, CFrameItem, &Self::CJetEnvironment) -> bool {
         match self {
+            ElementsExtension::Elements(Elements::CheckLockDuration) => {
+                &super::exec::check_lock_duration
+            }
+            ElementsExtension::Elements(Elements::CheckLockDistance) => {
+                &super::exec::check_lock_distance
+            }
+            ElementsExtension::Elements(Elements::TxLockDuration) => &super::exec::tx_lock_duration,
+            ElementsExtension::Elements(Elements::TxLockDistance) => &super::exec::tx_lock_distance,
             ElementsExtension::Elements(inner_jet) => jet_wrapper(*inner_jet),
             ElementsExtension::GetOpcodeFromScript => &super::exec::get_opcode_from_script,
             ElementsExtension::GetPubkeyFromScript => &super::exec::get_pubkey_from_script,
