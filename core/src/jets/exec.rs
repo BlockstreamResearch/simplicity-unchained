@@ -93,11 +93,11 @@ pub fn check_lock_duration(
     let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
-        false
-    } else {
-        let x = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
-        x <= lock_duration(tx, ix)
+        return false;
     }
+
+    let req_duration = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
+    req_duration <= lock_duration(tx, ix)
 }
 
 /// 2^16 |- ONE
@@ -109,11 +109,11 @@ pub fn check_lock_distance(
     let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
-        false
-    } else {
-        let x = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
-        x <= lock_distance(tx, ix)
+        return false;
     }
+
+    let req_distance = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
+    req_distance <= lock_distance(tx, ix)
 }
 
 /// ONE |- 2^16
@@ -125,11 +125,11 @@ pub fn tx_lock_duration(
     let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
-        false
-    } else {
-        unsafe { rustsimplicity_0_6_write16(dst, lock_duration(tx, ix)) };
-        true
+        return false;
     }
+
+    unsafe { rustsimplicity_0_6_write16(dst, lock_duration(tx, ix)) };
+    true
 }
 
 /// ONE |- 2^16
@@ -141,11 +141,11 @@ pub fn tx_lock_distance(
     let (tx, ix) = (env.env.tx(), env.env.ix());
 
     if tx.input.len() <= ix as usize {
-        false
-    } else {
-        unsafe { rustsimplicity_0_6_write16(dst, lock_distance(tx, ix)) };
-        true
+        return false;
     }
+
+    unsafe { rustsimplicity_0_6_write16(dst, lock_distance(tx, ix)) };
+    true
 }
 
 fn lock_duration(tx: &Transaction, ix: u32) -> u16 {
@@ -155,10 +155,10 @@ fn lock_duration(tx: &Transaction, ix: u32) -> u16 {
         && (tx.input[ix as usize].sequence.0 < 0x80000000)
         && (tx.input[ix as usize].sequence.0 & (1 << 22) != 0)
     {
-        (tx.input[ix as usize].sequence.0 & 0xFFFF) as u16
-    } else {
-        0
+        return (tx.input[ix as usize].sequence.0 & 0xFFFF) as u16;
     }
+
+    0
 }
 
 fn lock_distance(tx: &Transaction, ix: u32) -> u16 {
@@ -168,8 +168,7 @@ fn lock_distance(tx: &Transaction, ix: u32) -> u16 {
         && (tx.input[ix as usize].sequence.0 < 0x80000000)
         && (tx.input[ix as usize].sequence.0 & (1 << 22) == 0)
     {
-        (tx.input[ix as usize].sequence.0 & 0xFFFF) as u16
-    } else {
-        0
+        return (tx.input[ix as usize].sequence.0 & 0xFFFF) as u16;
     }
+    0
 }
