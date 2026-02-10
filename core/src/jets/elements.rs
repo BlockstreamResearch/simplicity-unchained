@@ -166,7 +166,7 @@ impl Jet for ElementsExtension {
     ) -> Result<Self, decode::Error> {
         let (mut elements_iter, mut custom_iter) = (bits.clone(), bits.clone());
         let bits_read = bits.n_total_read();
-
+        
         let try_elements = Elements::decode(&mut elements_iter);
 
         if let Ok(jet) = try_elements {

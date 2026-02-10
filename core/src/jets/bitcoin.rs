@@ -482,7 +482,7 @@ impl Jet for CoreExtension {
         w.write_bits_be(n, len)
     }
 
-    fn decode<I: Iterator<Item = u8> + Clone>(
+    fn decode<I: Iterator<Item = u8>>(
         bits: &mut BitIter<I>,
     ) -> Result<Self, decode::Error> {
         decode_bits!(bits, {

@@ -2742,4 +2742,4 @@ checksum = "e9747e91771f56fd7893e1164abd78febd14a670ceec257caad15e051de35f06"
 [[patch.unused]]
 name = "simplicity-lang"
 version = "0.7.0"
-source = "git+https://github.com/topologoanatom/rust-simplicity.git?branch=refactor%2Fbit-iter-clone#5d0e91f4b5e8b3fdd177b7b2fc4a72d9b5856b38"
+source = "git+https://github.com/topologoanatom/rust-simplicity.git?branch=refactor%2Fbit-iter-clone#f84b09d407d2c7712cd0cef23295cf0e59b1336a"
