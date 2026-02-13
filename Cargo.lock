@@ -2738,8 +2738,3 @@ name = "zmij"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9747e91771f56fd7893e1164abd78febd14a670ceec257caad15e051de35f06"
-
-[[patch.unused]]
-name = "simplicity-lang"
-version = "0.7.0"
-source = "git+https://github.com/topologoanatom/rust-simplicity.git?branch=refactor%2Fbit-iter-clone#f84b09d407d2c7712cd0cef23295cf0e59b1336a"

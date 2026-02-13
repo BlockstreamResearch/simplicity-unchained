@@ -161,18 +161,30 @@ impl Jet for ElementsExtension {
         w.write_bits_be(n, len)
     }
 
-    fn decode<I: Iterator<Item = u8> + Clone>(
-        bits: &mut BitIter<I>,
-    ) -> Result<Self, decode::Error> {
-        let (mut elements_iter, mut custom_iter) = (bits.clone(), bits.clone());
+    /// # Safety
+    ///
+    /// Due to the lack of a `Clone` bound on `I`, the underlying implementation uses
+    /// `ptr::read` to create bitwise copies of the iterator. This is unsafe and may cause
+    /// undefined behavior if `I` contains types that manage unique resources.
+    /// This works correctly for common slice-based iterators like `Copied<Iter<u8>>`.
+    ///
+    /// See <https://github.com/BlockstreamResearch/rust-simplicity/issues/342> for details.
+    fn decode<I: Iterator<Item = u8>>(bits: &mut BitIter<I>) -> Result<Self, decode::Error> {
+        let (mut elements_iter, mut custom_iter) =
+            unsafe { (std::ptr::read(bits), std::ptr::read(bits)) };
+
         let bits_read = bits.n_total_read();
-        
+
         let try_elements = Elements::decode(&mut elements_iter);
 
         if let Ok(jet) = try_elements {
             for _ in 0..(elements_iter.n_total_read() - bits_read) {
                 bits.next();
             }
+
+            std::mem::forget(elements_iter);
+            std::mem::forget(custom_iter);
+
             return Ok(ElementsExtension::Elements(jet));
         }
 
@@ -205,6 +217,10 @@ impl Jet for ElementsExtension {
                 bits.next();
             }
         }
+
+        std::mem::forget(elements_iter);
+        std::mem::forget(custom_iter);
+
         try_custom
     }
 
