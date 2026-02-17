@@ -216,6 +216,15 @@ dependencies = [
 
 [[package]]
 name = "bitcoin"
+version = "0.1.0"
+dependencies = [
+ "core",
+ "hal-simplicity",
+ "jet_plugins",
+]
+
+[[package]]
+name = "bitcoin"
 version = "0.32.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e499f9fc0407f50fe98af744ab44fa67d409f76b6772e1689ec8485eb0c0f66"
@@ -414,6 +423,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 name = "core"
 version = "0.1.0"
 dependencies = [
+ "dlopen2",
  "hal-simplicity",
  "hex 0.4.3",
  "hex-literal",
@@ -483,13 +493,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "dlopen2"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e2c5bd4158e66d1e215c49b837e11d62f3267b30c92f1d171c4d3105e3dc4d4"
+dependencies = [
+ "dlopen2_derive",
+ "libc",
+ "once_cell",
+ "winapi",
+]
+
+[[package]]
+name = "dlopen2_derive"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbbb781877580993a8707ec48672673ec7b81eeba04cfd2310bd28c08e47c8f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "elements"
+version = "0.1.0"
+dependencies = [
+ "core",
+ "hal-simplicity",
+ "jet_plugins",
+]
+
+[[package]]
 name = "elements"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81b2569d3495bfdfce36c504fd4d78752ff4a7699f8a33e6f3ee523bddf9f6ad"
 dependencies = [
  "bech32",
- "bitcoin",
+ "bitcoin 0.32.8",
  "secp256k1-zkp",
  "serde",
  "serde_json",
@@ -678,7 +720,7 @@ checksum = "f57a34f3cc18f2967a98c61abea03b1b9521075e880b18f45b63561a88c3c174"
 dependencies = [
  "base64-compat",
  "bip39",
- "bitcoin",
+ "bitcoin 0.32.8",
  "byteorder",
  "chrono",
  "clap 2.33.3",
@@ -699,9 +741,11 @@ dependencies = [
 [[package]]
 name = "hal-simplicity"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52a540615bef9124e283bbd087e007af922c9f6cfac210412bda4d1c34b2a74d"
 dependencies = [
  "clap 2.33.3",
- "elements",
+ "elements 0.25.2",
  "fern",
  "hal",
  "hex 0.3.2",
@@ -1085,6 +1129,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ee5b5339afb4c41626dde77b7a611bd4f2c202b897852b4bcf5d03eddc61010"
 
 [[package]]
+name = "jet_plugins"
+version = "0.1.0"
+dependencies = [
+ "bitcoin_hashes",
+ "core",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1123,7 +1178,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11209f386879b97198b2bfc9e9c1e5d42870825c6bd4376f17f95357244d6600"
 dependencies = [
  "bech32",
- "bitcoin",
+ "bitcoin 0.32.8",
  "lightning-types",
 ]
 
@@ -1133,7 +1188,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2cd84d4e71472035903e43caded8ecc123066ce466329ccd5ae537a8d5488c7"
 dependencies = [
- "bitcoin",
+ "bitcoin 0.32.8",
 ]
 
 [[package]]
@@ -1185,7 +1240,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "487906208f38448e186e3deb02f2b8ef046a9078b0de00bdb28bf4fb9b76951c"
 dependencies = [
  "bech32",
- "bitcoin",
+ "bitcoin 0.32.8",
 ]
 
 [[package]]
@@ -1245,6 +1300,24 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "opcode_pubkey_bitcoin"
+version = "0.1.0"
+dependencies = [
+ "core",
+ "hal-simplicity",
+ "jet_plugins",
+]
+
+[[package]]
+name = "opcode_pubkey_elements"
+version = "0.1.0"
+dependencies = [
+ "core",
+ "hal-simplicity",
+ "jet_plugins",
+]
 
 [[package]]
 name = "openssl"
@@ -1691,6 +1764,7 @@ dependencies = [
  "base64 0.22.1",
  "clap 4.5.53",
  "core",
+ "dlopen2",
  "hal-simplicity",
  "hex 0.4.3",
  "log",
@@ -1728,11 +1802,13 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "simplicity-lang"
 version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e57bd4d84853974a212eab24ed89da54f49fbccf5e33e93bcd29f0a6591cd5"
 dependencies = [
- "bitcoin",
+ "bitcoin 0.32.8",
  "bitcoin_hashes",
  "byteorder",
- "elements",
+ "elements 0.25.2",
  "getrandom 0.2.16",
  "ghost-cell",
  "hex-conservative",
@@ -1745,6 +1821,8 @@ dependencies = [
 [[package]]
 name = "simplicity-sys"
 version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bcb4e5bfc15080d67e0ce2c17d1c31bfb7521d65c86ea26ed0de72d5119d119"
 dependencies = [
  "bitcoin_hashes",
  "cc",

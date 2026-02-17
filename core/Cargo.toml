@@ -13,3 +13,4 @@ hex-literal = "1.1.0"
 hal-simplicity = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
+dlopen2 = "0.8.2"
