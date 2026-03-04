@@ -699,6 +699,8 @@ dependencies = [
 [[package]]
 name = "hal-simplicity"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52a540615bef9124e283bbd087e007af922c9f6cfac210412bda4d1c34b2a74d"
 dependencies = [
  "clap 2.33.3",
  "elements",
@@ -1728,6 +1730,8 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "simplicity-lang"
 version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e57bd4d84853974a212eab24ed89da54f49fbccf5e33e93bcd29f0a6591cd5"
 dependencies = [
  "bitcoin",
  "bitcoin_hashes",
@@ -1745,6 +1749,8 @@ dependencies = [
 [[package]]
 name = "simplicity-sys"
 version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bcb4e5bfc15080d67e0ce2c17d1c31bfb7521d65c86ea26ed0de72d5119d119"
 dependencies = [
  "bitcoin_hashes",
  "cc",

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["cli", "core", "service"]
 
 [workspace.dependencies]
-hal-simplicity = { path = "../hal-unchained" }
+hal-simplicity = "0.2.0"
 clap = { version = "4.5.53", features = ["derive"] }
 hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
