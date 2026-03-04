@@ -35,9 +35,10 @@ mod tests {
 
             let mut iter = BitIter::from(&source[..]);
 
-            let decoded_jet = ElementsExtension::decode(&mut iter).unwrap();
+            let decoded_jet = ElementsExtension::decode(&mut iter);
 
-            assert_eq!(decoded_jet, expected_jet);
+            assert!(decoded_jet.is_ok());
+            assert_eq!(decoded_jet.unwrap(), expected_jet);
         }
 
         for expected_jet in CoreExtension::ALL {
@@ -50,9 +51,10 @@ mod tests {
 
             let mut iter = BitIter::from(&source[..]);
 
-            let decoded_jet = CoreExtension::decode(&mut iter).unwrap();
+            let decoded_jet = CoreExtension::decode(&mut iter);
 
-            assert_eq!(decoded_jet, expected_jet);
+            assert!(decoded_jet.is_ok());
+            assert_eq!(decoded_jet.unwrap(), expected_jet);
         }
     }
 

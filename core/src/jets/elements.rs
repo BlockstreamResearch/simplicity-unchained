@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::mem::MaybeUninit;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use hal_simplicity::simplicity::Cmr;
 use hal_simplicity::simplicity::Cost;
@@ -13,6 +15,21 @@ use hal_simplicity::simplicity::elements::Transaction;
 use hal_simplicity::simplicity::jet::elements::ElementsEnv;
 
 use super::environments::UnchainedEnv;
+
+static C_JET_PTRS: LazyLock<
+    HashMap<
+        ElementsExtension,
+        &'static (
+                     dyn Fn(
+            &mut CFrameItem,
+            CFrameItem,
+            &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
+        ) -> bool
+                         + Send
+                         + Sync
+                 ),
+    >,
+> = LazyLock::new(|| build_c_jet_ptrs());
 
 // Local version of decode_bits macro that accepts expressions instead of just paths
 macro_rules! decode_bits {
@@ -44,7 +61,6 @@ impl ElementsExtension {
     const ALL_JETS_NUM: usize = Elements::ALL.len() + 2;
 
     const fn build_all_variants() -> [Self; Self::ALL_JETS_NUM] {
-        // Maybe worth adding Uninit field to enum or use one of available enum variants to avoid unsafe code
         struct AllVariantsBuilder {
             data: [MaybeUninit<ElementsExtension>; ElementsExtension::ALL_JETS_NUM],
             len: usize,
@@ -85,6 +101,104 @@ impl ElementsExtension {
 
         builder.finalize()
     }
+}
+
+fn build_c_jet_ptrs() -> HashMap<
+    ElementsExtension,
+    &'static (
+                 dyn Fn(
+        &mut CFrameItem,
+        CFrameItem,
+        &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
+    ) -> bool
+                     + Send
+                     + Sync
+             ),
+> {
+    ElementsExtension::ALL
+        .iter()
+        .map(|jet| {
+            let boxed: Box<
+                dyn Fn(
+                        &mut CFrameItem,
+                        CFrameItem,
+                        &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
+                    ) -> bool
+                    + Send
+                    + Sync,
+            > = match jet {
+                // hijacked elements jets
+                ElementsExtension::Elements(Elements::CheckLockDuration) => Box::new(
+                    move |dst: &mut CFrameItem,
+                          src: CFrameItem,
+                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
+                          -> bool {
+                        super::exec::check_lock_duration(dst, src, env)
+                    },
+                ),
+                ElementsExtension::Elements(Elements::CheckLockDistance) => Box::new(
+                    move |dst: &mut CFrameItem,
+                          src: CFrameItem,
+                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
+                          -> bool {
+                        super::exec::check_lock_distance(dst, src, env)
+                    },
+                ),
+                ElementsExtension::Elements(Elements::TxLockDuration) => Box::new(
+                    move |dst: &mut CFrameItem,
+                          src: CFrameItem,
+                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
+                          -> bool {
+                        super::exec::tx_lock_duration(dst, src, env)
+                    },
+                ),
+                ElementsExtension::Elements(Elements::TxLockDistance) => Box::new(
+                    move |dst: &mut CFrameItem,
+                          src: CFrameItem,
+                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
+                          -> bool {
+                        super::exec::tx_lock_distance(dst, src, env)
+                    },
+                ),
+                // rest of elements jets
+                ElementsExtension::Elements(inner_jet) => Box::new(
+                    move |dst: &mut CFrameItem,
+                          src: CFrameItem,
+                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
+                          -> bool {
+                        inner_jet.c_jet_ptr()(dst, src, env.env.c_tx_env())
+                    },
+                ),
+                // custom jets
+                ElementsExtension::GetOpcodeFromScript => Box::new(
+                    move |dst: &mut CFrameItem,
+                          src: CFrameItem,
+                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
+                          -> bool {
+                        super::exec::get_opcode_from_script(dst, src, env)
+                    },
+                ),
+                ElementsExtension::GetPubkeyFromScript => Box::new(
+                    move |dst: &mut CFrameItem,
+                          src: CFrameItem,
+                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
+                          -> bool {
+                        super::exec::get_pubkey_from_script(dst, src, env)
+                    },
+                ),
+            };
+            let leaked: &'static (
+                         dyn Fn(
+                &mut CFrameItem,
+                CFrameItem,
+                &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
+            ) -> bool
+                             + Send
+                             + Sync
+                     ) = Box::leak(boxed);
+            (*jet, leaked)
+        })
+        .collect()
 }
 
 impl Jet for ElementsExtension {
@@ -225,19 +339,9 @@ impl Jet for ElementsExtension {
     }
 
     fn c_jet_ptr(&self) -> &dyn Fn(&mut CFrameItem, CFrameItem, &Self::CJetEnvironment) -> bool {
-        match self {
-            ElementsExtension::Elements(Elements::CheckLockDuration) => {
-                &super::exec::check_lock_duration
-            }
-            ElementsExtension::Elements(Elements::CheckLockDistance) => {
-                &super::exec::check_lock_distance
-            }
-            ElementsExtension::Elements(Elements::TxLockDuration) => &super::exec::tx_lock_duration,
-            ElementsExtension::Elements(Elements::TxLockDistance) => &super::exec::tx_lock_distance,
-            ElementsExtension::Elements(inner_jet) => jet_wrapper(*inner_jet),
-            ElementsExtension::GetOpcodeFromScript => &super::exec::get_opcode_from_script,
-            ElementsExtension::GetPubkeyFromScript => &super::exec::get_pubkey_from_script,
-        }
+        C_JET_PTRS
+            .get(self)
+            .expect("All enum variants should be initialized")
     }
 
     fn cost(&self) -> Cost {
@@ -277,508 +381,4 @@ impl std::str::FromStr for ElementsExtension {
             }
         }
     }
-}
-
-// Macro to generate static wrapper functions AND dispatcher for Elements jets
-// This macro generates both the wrapper functions and the match statement in one go,
-// so we only need to list each Elements variant once.
-macro_rules! jet_wrappers {
-    ($($variant:ident),* $(,)?) => {
-        // Generate individual wrapper functions for each variant
-        $(
-            #[allow(non_snake_case)]
-            fn $variant(frame: &mut CFrameItem, arg: CFrameItem, env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>) -> bool {
-                Elements::$variant.c_jet_ptr()(frame, arg, env.env.c_tx_env())
-            }
-        )*
-
-        // Generate the dispatcher function that returns the appropriate wrapper
-        fn jet_wrapper(jet: Elements) -> &'static dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<ElementsEnv<Arc<Transaction>>>) -> bool {
-            match jet {
-                $(
-                    Elements::$variant => &$variant,
-                )*
-            }
-        }
-    };
-}
-
-// Generate wrapper functions and dispatcher for all Elements jet variants
-// If Elements enum changes, only update this list to keep wrappers in sync
-//
-// TODO(ivanlele): This is extremly ungly solution, will need to open an issue
-// for `rust-simplicity` to better interface for jet trait that
-// does not require this boilerplate
-jet_wrappers! {
-    Add16,
-    Add32,
-    Add64,
-    Add8,
-    All16,
-    All32,
-    All64,
-    All8,
-    And1,
-    And16,
-    And32,
-    And64,
-    And8,
-    AnnexHash,
-    AssetAmountHash,
-    Bip0340Verify,
-    BuildTapbranch,
-    BuildTapleafSimplicity,
-    BuildTaptweak,
-    CalculateAsset,
-    CalculateConfidentialToken,
-    CalculateExplicitToken,
-    CalculateIssuanceEntropy,
-    Ch1,
-    Ch16,
-    Ch32,
-    Ch64,
-    Ch8,
-    CheckLockDistance,
-    CheckLockDuration,
-    CheckLockHeight,
-    CheckLockTime,
-    CheckSigVerify,
-    Complement1,
-    Complement16,
-    Complement32,
-    Complement64,
-    Complement8,
-    CurrentAmount,
-    CurrentAnnexHash,
-    CurrentAsset,
-    CurrentIndex,
-    CurrentIssuanceAssetAmount,
-    CurrentIssuanceAssetProof,
-    CurrentIssuanceTokenAmount,
-    CurrentIssuanceTokenProof,
-    CurrentNewIssuanceContract,
-    CurrentPegin,
-    CurrentPrevOutpoint,
-    CurrentReissuanceBlinding,
-    CurrentReissuanceEntropy,
-    CurrentScriptHash,
-    CurrentScriptSigHash,
-    CurrentSequence,
-    Decompress,
-    Decrement16,
-    Decrement32,
-    Decrement64,
-    Decrement8,
-    DivMod128_64,
-    DivMod16,
-    DivMod32,
-    DivMod64,
-    DivMod8,
-    Divide16,
-    Divide32,
-    Divide64,
-    Divide8,
-    Divides16,
-    Divides32,
-    Divides64,
-    Divides8,
-    Eq1,
-    Eq16,
-    Eq256,
-    Eq32,
-    Eq64,
-    Eq8,
-    FeAdd,
-    FeInvert,
-    FeIsOdd,
-    FeIsZero,
-    FeMultiply,
-    FeMultiplyBeta,
-    FeNegate,
-    FeNormalize,
-    FeSquare,
-    FeSquareRoot,
-    FullAdd16,
-    FullAdd32,
-    FullAdd64,
-    FullAdd8,
-    FullDecrement16,
-    FullDecrement32,
-    FullDecrement64,
-    FullDecrement8,
-    FullIncrement16,
-    FullIncrement32,
-    FullIncrement64,
-    FullIncrement8,
-    FullLeftShift16_1,
-    FullLeftShift16_2,
-    FullLeftShift16_4,
-    FullLeftShift16_8,
-    FullLeftShift32_1,
-    FullLeftShift32_16,
-    FullLeftShift32_2,
-    FullLeftShift32_4,
-    FullLeftShift32_8,
-    FullLeftShift64_1,
-    FullLeftShift64_16,
-    FullLeftShift64_2,
-    FullLeftShift64_32,
-    FullLeftShift64_4,
-    FullLeftShift64_8,
-    FullLeftShift8_1,
-    FullLeftShift8_2,
-    FullLeftShift8_4,
-    FullMultiply16,
-    FullMultiply32,
-    FullMultiply64,
-    FullMultiply8,
-    FullRightShift16_1,
-    FullRightShift16_2,
-    FullRightShift16_4,
-    FullRightShift16_8,
-    FullRightShift32_1,
-    FullRightShift32_16,
-    FullRightShift32_2,
-    FullRightShift32_4,
-    FullRightShift32_8,
-    FullRightShift64_1,
-    FullRightShift64_16,
-    FullRightShift64_2,
-    FullRightShift64_32,
-    FullRightShift64_4,
-    FullRightShift64_8,
-    FullRightShift8_1,
-    FullRightShift8_2,
-    FullRightShift8_4,
-    FullSubtract16,
-    FullSubtract32,
-    FullSubtract64,
-    FullSubtract8,
-    GeIsOnCurve,
-    GeNegate,
-    GejAdd,
-    GejDouble,
-    GejEquiv,
-    GejGeAdd,
-    GejGeAddEx,
-    GejGeEquiv,
-    GejInfinity,
-    GejIsInfinity,
-    GejIsOnCurve,
-    GejNegate,
-    GejNormalize,
-    GejRescale,
-    GejXEquiv,
-    GejYIsOdd,
-    Generate,
-    GenesisBlockHash,
-    HashToCurve,
-    High1,
-    High16,
-    High32,
-    High64,
-    High8,
-    Increment16,
-    Increment32,
-    Increment64,
-    Increment8,
-    InputAmount,
-    InputAmountsHash,
-    InputAnnexHash,
-    InputAnnexesHash,
-    InputAsset,
-    InputHash,
-    InputOutpointsHash,
-    InputPegin,
-    InputPrevOutpoint,
-    InputScriptHash,
-    InputScriptSigHash,
-    InputScriptSigsHash,
-    InputScriptsHash,
-    InputSequence,
-    InputSequencesHash,
-    InputUtxoHash,
-    InputUtxosHash,
-    InputsHash,
-    InternalKey,
-    IsOne16,
-    IsOne32,
-    IsOne64,
-    IsOne8,
-    IsZero16,
-    IsZero32,
-    IsZero64,
-    IsZero8,
-    Issuance,
-    IssuanceAsset,
-    IssuanceAssetAmount,
-    IssuanceAssetAmountsHash,
-    IssuanceAssetProof,
-    IssuanceBlindingEntropyHash,
-    IssuanceEntropy,
-    IssuanceHash,
-    IssuanceRangeProofsHash,
-    IssuanceToken,
-    IssuanceTokenAmount,
-    IssuanceTokenAmountsHash,
-    IssuanceTokenProof,
-    IssuancesHash,
-    LbtcAsset,
-    Le16,
-    Le32,
-    Le64,
-    Le8,
-    LeftExtend16_32,
-    LeftExtend16_64,
-    LeftExtend1_16,
-    LeftExtend1_32,
-    LeftExtend1_64,
-    LeftExtend1_8,
-    LeftExtend32_64,
-    LeftExtend8_16,
-    LeftExtend8_32,
-    LeftExtend8_64,
-    LeftPadHigh16_32,
-    LeftPadHigh16_64,
-    LeftPadHigh1_16,
-    LeftPadHigh1_32,
-    LeftPadHigh1_64,
-    LeftPadHigh1_8,
-    LeftPadHigh32_64,
-    LeftPadHigh8_16,
-    LeftPadHigh8_32,
-    LeftPadHigh8_64,
-    LeftPadLow16_32,
-    LeftPadLow16_64,
-    LeftPadLow1_16,
-    LeftPadLow1_32,
-    LeftPadLow1_64,
-    LeftPadLow1_8,
-    LeftPadLow32_64,
-    LeftPadLow8_16,
-    LeftPadLow8_32,
-    LeftPadLow8_64,
-    LeftRotate16,
-    LeftRotate32,
-    LeftRotate64,
-    LeftRotate8,
-    LeftShift16,
-    LeftShift32,
-    LeftShift64,
-    LeftShift8,
-    LeftShiftWith16,
-    LeftShiftWith32,
-    LeftShiftWith64,
-    LeftShiftWith8,
-    Leftmost16_1,
-    Leftmost16_2,
-    Leftmost16_4,
-    Leftmost16_8,
-    Leftmost32_1,
-    Leftmost32_16,
-    Leftmost32_2,
-    Leftmost32_4,
-    Leftmost32_8,
-    Leftmost64_1,
-    Leftmost64_16,
-    Leftmost64_2,
-    Leftmost64_32,
-    Leftmost64_4,
-    Leftmost64_8,
-    Leftmost8_1,
-    Leftmost8_2,
-    Leftmost8_4,
-    LinearCombination1,
-    LinearVerify1,
-    LockTime,
-    Low1,
-    Low16,
-    Low32,
-    Low64,
-    Low8,
-    Lt16,
-    Lt32,
-    Lt64,
-    Lt8,
-    Maj1,
-    Maj16,
-    Maj32,
-    Maj64,
-    Maj8,
-    Max16,
-    Max32,
-    Max64,
-    Max8,
-    Median16,
-    Median32,
-    Median64,
-    Median8,
-    Min16,
-    Min32,
-    Min64,
-    Min8,
-    Modulo16,
-    Modulo32,
-    Modulo64,
-    Modulo8,
-    Multiply16,
-    Multiply32,
-    Multiply64,
-    Multiply8,
-    Negate16,
-    Negate32,
-    Negate64,
-    Negate8,
-    NewIssuanceContract,
-    NonceHash,
-    NumInputs,
-    NumOutputs,
-    One16,
-    One32,
-    One64,
-    One8,
-    Or1,
-    Or16,
-    Or32,
-    Or64,
-    Or8,
-    OutpointHash,
-    OutputAmount,
-    OutputAmountsHash,
-    OutputAsset,
-    OutputHash,
-    OutputIsFee,
-    OutputNonce,
-    OutputNoncesHash,
-    OutputNullDatum,
-    OutputRangeProof,
-    OutputRangeProofsHash,
-    OutputScriptHash,
-    OutputScriptsHash,
-    OutputSurjectionProof,
-    OutputSurjectionProofsHash,
-    OutputsHash,
-    ParseLock,
-    ParseSequence,
-    PointVerify1,
-    ReissuanceBlinding,
-    ReissuanceEntropy,
-    RightExtend16_32,
-    RightExtend16_64,
-    RightExtend32_64,
-    RightExtend8_16,
-    RightExtend8_32,
-    RightExtend8_64,
-    RightPadHigh16_32,
-    RightPadHigh16_64,
-    RightPadHigh1_16,
-    RightPadHigh1_32,
-    RightPadHigh1_64,
-    RightPadHigh1_8,
-    RightPadHigh32_64,
-    RightPadHigh8_16,
-    RightPadHigh8_32,
-    RightPadHigh8_64,
-    RightPadLow16_32,
-    RightPadLow16_64,
-    RightPadLow1_16,
-    RightPadLow1_32,
-    RightPadLow1_64,
-    RightPadLow1_8,
-    RightPadLow32_64,
-    RightPadLow8_16,
-    RightPadLow8_32,
-    RightPadLow8_64,
-    RightRotate16,
-    RightRotate32,
-    RightRotate64,
-    RightRotate8,
-    RightShift16,
-    RightShift32,
-    RightShift64,
-    RightShift8,
-    RightShiftWith16,
-    RightShiftWith32,
-    RightShiftWith64,
-    RightShiftWith8,
-    Rightmost16_1,
-    Rightmost16_2,
-    Rightmost16_4,
-    Rightmost16_8,
-    Rightmost32_1,
-    Rightmost32_16,
-    Rightmost32_2,
-    Rightmost32_4,
-    Rightmost32_8,
-    Rightmost64_1,
-    Rightmost64_16,
-    Rightmost64_2,
-    Rightmost64_32,
-    Rightmost64_4,
-    Rightmost64_8,
-    Rightmost8_1,
-    Rightmost8_2,
-    Rightmost8_4,
-    ScalarAdd,
-    ScalarInvert,
-    ScalarIsZero,
-    ScalarMultiply,
-    ScalarMultiplyLambda,
-    ScalarNegate,
-    ScalarNormalize,
-    ScalarSquare,
-    Scale,
-    ScriptCMR,
-    Sha256Block,
-    Sha256Ctx8Add1,
-    Sha256Ctx8Add128,
-    Sha256Ctx8Add16,
-    Sha256Ctx8Add2,
-    Sha256Ctx8Add256,
-    Sha256Ctx8Add32,
-    Sha256Ctx8Add4,
-    Sha256Ctx8Add512,
-    Sha256Ctx8Add64,
-    Sha256Ctx8Add8,
-    Sha256Ctx8AddBuffer511,
-    Sha256Ctx8Finalize,
-    Sha256Ctx8Init,
-    Sha256Iv,
-    SigAllHash,
-    Some1,
-    Some16,
-    Some32,
-    Some64,
-    Some8,
-    Subtract16,
-    Subtract32,
-    Subtract64,
-    Subtract8,
-    Swu,
-    TapEnvHash,
-    TapdataInit,
-    TapleafHash,
-    TapleafVersion,
-    Tappath,
-    TappathHash,
-    TotalFee,
-    TransactionId,
-    TxHash,
-    TxIsFinal,
-    TxLockDistance,
-    TxLockDuration,
-    TxLockHeight,
-    TxLockTime,
-    Verify,
-    Version,
-    Xor1,
-    Xor16,
-    Xor32,
-    Xor64,
-    Xor8,
-    XorXor1,
-    XorXor16,
-    XorXor32,
-    XorXor64,
-    XorXor8,
 }
