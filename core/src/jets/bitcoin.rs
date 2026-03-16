@@ -12,12 +12,9 @@ use hal_simplicity::simplicity::{BitIter, BitWriter, decode};
 
 use super::environments::UnchainedEnv;
 
-static C_JET_PTRS: LazyLock<
-    HashMap<
-        CoreExtension,
-        &'static (dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<()>) -> bool + Send + Sync),
-    >,
-> = LazyLock::new(|| build_c_jet_ptrs());
+type CJetPtr = dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<()>) -> bool + Send + Sync;
+static C_JET_PTRS: LazyLock<HashMap<CoreExtension, &'static CJetPtr>> =
+    LazyLock::new(|| build_c_jet_ptrs());
 
 // Local version of decode_bits macro that accepts expressions instead of just paths
 macro_rules! decode_bits {
@@ -91,16 +88,11 @@ impl CoreExtension {
     }
 }
 
-fn build_c_jet_ptrs() -> HashMap<
-    CoreExtension,
-    &'static (dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<()>) -> bool + Send + Sync),
-> {
+fn build_c_jet_ptrs() -> HashMap<CoreExtension, &'static CJetPtr> {
     CoreExtension::ALL
         .iter()
         .map(|jet| {
-            let boxed: Box<
-                dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<()>) -> bool + Send + Sync,
-            > = match jet {
+            let boxed: Box<CJetPtr> = match jet {
                 // rest of elements jets
                 CoreExtension::Core(inner_jet) => Box::new(
                     move |dst: &mut CFrameItem, src: CFrameItem, _: &UnchainedEnv<()>| -> bool {

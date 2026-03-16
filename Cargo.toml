@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["cli", "core", "service"]
+members = [
+    "cli",
+    "core",
+    "jet_plugins",
+    "plugin_tests/bitcoin",
+    "plugin_tests/opcode_pubkey_elements",
+    "plugin_tests/opcode_pubkey_bitcoin",
+    "plugin_tests/elements",
+    "service",
+]
 
 [workspace.dependencies]
 hal-simplicity = "0.2.0"

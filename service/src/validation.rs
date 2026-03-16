@@ -11,7 +11,7 @@ pub fn validate_hex(hex: &str) -> Result<(), ValidationError> {
     if hex.trim().is_empty() {
         return Err(ValidationError::new("hex_empty"));
     }
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(ValidationError::new("hex_odd_length"));
     }
     if !hex.chars().all(|c| c.is_ascii_hexdigit()) {

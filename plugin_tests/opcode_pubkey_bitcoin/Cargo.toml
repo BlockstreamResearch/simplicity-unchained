@@ -1,0 +1,12 @@
+[package]
+name = "opcode_pubkey_bitcoin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hal-simplicity = { workspace = true }
+core = { path = "../../core" }
+jet_plugins = { path = "../../jet_plugins" }
+
+[lib]
+crate-type = ["cdylib"]

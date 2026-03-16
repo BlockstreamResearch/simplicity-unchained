@@ -92,13 +92,7 @@ pub fn execute(psbt_hex: &str) -> Result<()> {
     let witnesses: Vec<_> = tx
         .input
         .iter()
-        .map(|input| {
-            input
-                .witness
-                .iter()
-                .map(|w| hex::encode(w))
-                .collect::<Vec<_>>()
-        })
+        .map(|input| input.witness.iter().map(hex::encode).collect::<Vec<_>>())
         .collect();
 
     let output = json!({

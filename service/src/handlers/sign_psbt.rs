@@ -2,6 +2,7 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use hal_simplicity::{
     bitcoin::secp256k1,
+    hal_simplicity::Program,
     simplicity::elements::{
         schnorr::{TapTweak, UntweakedKeypair},
         taproot::TapNodeHash,
@@ -18,7 +19,10 @@ use serde::{Deserialize, Serialize};
 
 use validator::Validate;
 
-use simplicity_unchained_core::runner::SimplicityRunner;
+use simplicity_unchained_core::{
+    jets::custom_jet::CustomJet,
+    runner::{RunnerError, SimplicityRunner},
+};
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
@@ -72,8 +76,9 @@ pub async fn sign_psbt(
     match sign_psbt_internal(&state, request) {
         Ok(response) => {
             log::info!(
-                "[200] Sign PSBT successful: Tweaked Public Key {}",
-                response.public_key_hex
+                "[200] Sign PSBT successful: Tweaked Public Key {}, custom jets used: {}",
+                response.public_key_hex,
+                state.has_custom_jets
             );
 
             (StatusCode::OK, Json(response)).into_response()
@@ -108,17 +113,34 @@ fn sign_psbt_internal(
         .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
 
     let redeem_script = Script::from_bytes(&redeem_script_bytes).to_owned();
-
     // Validate with Simplicity runner before signing
-    let cmr = SimplicityRunner::execute_bitcoin(
-        &request.program,
-        request.witness.as_deref(),
-        request.input_index,
-        &psbt,
-        hal_simplicity::simplicity::elements::Script::from(redeem_script_bytes),
-        state.bitcoin_network.clone(),
-    )
-    .map_err(|e| format!("Simplicity execution failed: {}", e))?;
+
+    let cmr = if !state.has_custom_jets {
+        SimplicityRunner::execute_bitcoin(
+            &request.program,
+            request.witness.as_deref(),
+            request.input_index,
+            &psbt,
+            hal_simplicity::simplicity::elements::Script::from(redeem_script_bytes),
+            state.bitcoin_network,
+        )
+        .map_err(|e| format!("Simplicity execution failed: {}", e))?
+    } else {
+        let program =
+            Program::<CustomJet<()>>::from_str(&request.program, request.witness.as_deref())
+                .map_err(RunnerError::ProgramParse)
+                .map_err(|e| format!("Simplicity execution failed: {}", e))?;
+
+        SimplicityRunner::execute_custom(
+            program,
+            request.input_index,
+            &psbt,
+            hal_simplicity::simplicity::elements::Script::from(redeem_script_bytes),
+            (),
+            state.bitcoin_network,
+        )
+        .map_err(|e| format!("Simplicity execution failed: {}", e))?
+    };
 
     let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
     let tweaked_keypair = untweaked_keypair.tap_tweak(
@@ -213,6 +235,7 @@ mod tests {
             secp: Arc::new(Secp256k1::new()),
             elements_network: simplicity_unchained_core::ElementsNetwork::LiquidTestnet,
             bitcoin_network: simplicity_unchained_core::BitcoinNetwork::Testnet,
+            has_custom_jets: false,
         }
     }
 
