@@ -90,7 +90,7 @@ SIGN_REQUEST=$(jq -n \
   --arg redeem "$REDEEM_SCRIPT" \
   --arg program "$PROGRAM" \
   --arg witness "$WITNESS" \
-  '{pset_hex: $pset, redeem_script_hex: $redeem, input_index: 0, program: $program, witness: $witness}')
+  '{pset_hex: $pset, redeem_script_hex: $redeem, input_index: 0, spend_type: "P2WSH", program: $program, witness: $witness}')
 
 PSET_SIGN1_DATA=$(curl -s -X POST http://localhost:30431/simplicity-unchained/sign/pset \
   -H "Content-Type: application/json" \

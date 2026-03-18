@@ -2,7 +2,7 @@ pub mod sign_psbt;
 pub mod sign_pset;
 pub mod tweak;
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use axum::{
     Json, Router,
@@ -37,6 +37,24 @@ pub fn routes(signer_state: SignerState) -> Router {
         )
         .route("/simplicity-unchained/tweak", post(tweak::get_tweaked_key))
         .with_state(signer_state)
+}
+
+pub enum SpendType {
+    P2SH,
+    P2WSH,
+    P2TR,
+}
+
+impl FromStr for SpendType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_ref() {
+            "p2sh" => Ok(Self::P2SH),
+            "p2wsh" => Ok(Self::P2WSH),
+            "p2tr" => Ok(Self::P2TR),
+            _ => Err("Unsupported spend type".to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
