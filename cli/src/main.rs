@@ -40,7 +40,8 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AddressCommands {
-    /// Generate a 2-of-2 multisig address from two public keys
+    /// Generate a 2-of-2 multisig address from two public keys.
+    /// Use --type to select p2sh (legacy) or p2wsh (segwit v0). Defaults to p2wsh.
     Multisig {
         /// First public key in hex format
         #[arg(short = '1', long)]
@@ -51,6 +52,22 @@ enum AddressCommands {
         pubkey2: String,
 
         /// Network (elements, liquid, liquid_testnet, bitcoin, testnet, testnet4)
+        #[arg(short, long, default_value = "elements")]
+        network: String,
+
+        /// Script type: p2wsh (default) or p2sh
+        #[arg(short, long, default_value = "p2wsh")]
+        type_: String,
+    },
+
+    /// Generate a P2TR (Taproot) address from a single public key.
+    /// The key is used as the internal key and tweaked with the Simplicity CMR.
+    P2tr {
+        /// Public key in hex format (the tweaked co-signer key)
+        #[arg(short, long)]
+        pubkey: String,
+
+        /// Network (elements, liquid, liquid_testnet)
         #[arg(short, long, default_value = "elements")]
         network: String,
     },
@@ -163,8 +180,12 @@ fn main() -> Result<()> {
                 pubkey1,
                 pubkey2,
                 network,
+                type_,
             } => {
-                commands::address::multisig::execute(&pubkey1, &pubkey2, &network)?;
+                commands::address::multisig::execute(&pubkey1, &pubkey2, &network, &type_)?;
+            }
+            AddressCommands::P2tr { pubkey, network } => {
+                commands::address::p2tr::execute(&pubkey, &network)?;
             }
         },
 

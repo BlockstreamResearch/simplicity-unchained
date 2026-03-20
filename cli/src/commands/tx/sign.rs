@@ -52,20 +52,32 @@ pub fn execute(
 
     let pset_input = &pset.inputs()[input_index];
 
-    let prev_value = pset_input
+    let script_pubkey = pset_input
         .witness_utxo
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Missing witness UTXO for input {}", input_index))?
-        .value;
+        .script_pubkey
+        .clone();
 
-    // Compute sighash for P2WSH (SegWit v0)
+    let prev_value = pset_input.witness_utxo.as_ref().unwrap().value;
+
     let mut sighash_cache = SighashCache::new(&tx);
-    let sighash = sighash_cache.segwitv0_sighash(
-        input_index,
-        &redeem_script,
-        prev_value,
-        EcdsaSighashType::All,
-    );
+
+    let sighash = if script_pubkey.is_p2sh() {
+        sighash_cache.legacy_sighash(input_index, &redeem_script, EcdsaSighashType::All)
+    } else if script_pubkey.is_v0_p2wsh() {
+        sighash_cache.segwitv0_sighash(
+            input_index,
+            &redeem_script,
+            prev_value,
+            EcdsaSighashType::All,
+        )
+    } else {
+        return Err(anyhow::anyhow!(
+            "Unsupported script type for tx sign: {}",
+            hex::encode(script_pubkey.as_bytes())
+        ));
+    };
 
     let msg = Message::from_digest(sighash.to_byte_array());
     let signature = secp.sign_ecdsa(&msg, &secret_key);
@@ -73,12 +85,17 @@ pub fn execute(
     let mut sig_bytes = signature.serialize_der().to_vec();
     sig_bytes.push(EcdsaSighashType::All.as_u32() as u8);
 
-    // Add signature to PSET
     let input = &mut pset.inputs_mut()[input_index];
     input.partial_sigs.insert(public_key, sig_bytes.clone());
 
-    if input.witness_script.is_none() {
-        input.witness_script = Some(redeem_script.clone());
+    if script_pubkey.is_p2sh() {
+        if input.redeem_script.is_none() {
+            input.redeem_script = Some(redeem_script.clone());
+        }
+    } else if script_pubkey.is_v0_p2wsh() {
+        if input.witness_script.is_none() {
+            input.witness_script = Some(redeem_script.clone());
+        }
     }
 
     let partial_sigs_count = pset.inputs()[input_index].partial_sigs.len();

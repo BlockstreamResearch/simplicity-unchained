@@ -56,17 +56,15 @@ pub fn generate_keypair() -> (SecretKey, PublicKey) {
     (secret_key, public_key)
 }
 
-/// Generate a 2-of-2 multisig address from a list of public keys
-/// Returns the address and the redeem script
 pub fn generate_2of2_multisig_address_elements(
     pubkeys: &[PublicKey],
     address_params: &'static elements::AddressParams,
+    use_p2sh: bool,
 ) -> Result<(elements::Address, elements::script::Script), UtilsError> {
     if pubkeys.len() != 2 {
         return Err(UtilsError::InvalidPublicKeyCount(pubkeys.len()));
     }
 
-    // Build the 2-of-2 multisig script
     let redeem_script = elements::script::Builder::new()
         .push_int(2)
         .push_key(&pubkeys[0])
@@ -75,14 +73,14 @@ pub fn generate_2of2_multisig_address_elements(
         .push_opcode(elements::opcodes::all::OP_CHECKMULTISIG)
         .into_script();
 
-    // Create the P2WSH address from the redeem script
-    let address = elements::Address::p2wsh(&redeem_script, None, address_params);
-
-    // hal_simplicity::simplicity::bitcoin::Address::p2wsh(script, hrp)
+    let address = if use_p2sh {
+        elements::Address::p2sh(&redeem_script, None, address_params)
+    } else {
+        elements::Address::p2wsh(&redeem_script, None, address_params)
+    };
 
     Ok((address, redeem_script))
 }
-
 /// Generate a 2-of-2 multisig address from a list of public keys
 /// Returns the address and the redeem script
 pub fn generate_2of2_multisig_address_bitcoin(
@@ -132,8 +130,11 @@ mod tests {
         let (_sk2, pk2) = generate_keypair();
 
         let pubkeys = vec![pk1, pk2];
-        let result =
-            generate_2of2_multisig_address_elements(&pubkeys, &elements::AddressParams::ELEMENTS);
+        let result = generate_2of2_multisig_address_elements(
+            &pubkeys,
+            &elements::AddressParams::ELEMENTS,
+            false,
+        );
 
         assert!(result.is_ok());
         let (address, redeem_script) = result.unwrap();
@@ -150,8 +151,11 @@ mod tests {
         let (_sk1, pk1) = generate_keypair();
 
         let pubkeys = vec![pk1];
-        let result =
-            generate_2of2_multisig_address_elements(&pubkeys, &elements::AddressParams::ELEMENTS);
+        let result = generate_2of2_multisig_address_elements(
+            &pubkeys,
+            &elements::AddressParams::ELEMENTS,
+            false,
+        );
 
         assert!(result.is_err());
         assert!(matches!(
