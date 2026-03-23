@@ -55,10 +55,8 @@ TWEAK_RESPONSE=$(curl -s -X POST http://localhost:30431/simplicity-unchained/twe
   -d "$TWEAK_REQUEST")
 
 COSIGNER_PUBKEY=$(echo "$TWEAK_RESPONSE" | jq -r '.tweaked_public_key_hex')
-COSIGNER_PUBKEY_UNTWEAKED=$(echo "$TWEAK_RESPONSE" | jq -r '.untweaked_public_key_hex')
 CMR=$(echo "$TWEAK_RESPONSE" | jq -r '.cmr_hex')
 
-echo "Untweaked public key (Co-signer): $COSIGNER_PUBKEY_UNTWEAKED"
 echo "Tweaked public key (Co-signer):   $COSIGNER_PUBKEY"
 echo "CMR:                              $CMR"
 echo
@@ -94,8 +92,7 @@ case "$SPEND_TYPE" in
     ;;
   p2tr)
     ADDRESS_DATA=$(cargo run --quiet -- address p2tr \
-      --pubkey $COSIGNER_PUBKEY_UNTWEAKED \
-      --cmr $CMR \
+      --pubkey $COSIGNER_PUBKEY \
       --network $NETWORK)
     REDEEM_SCRIPT=""
     ;;

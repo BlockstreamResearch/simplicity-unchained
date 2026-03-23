@@ -1,4 +1,5 @@
 use hal_simplicity::simplicity::bitcoin;
+use hal_simplicity::simplicity::elements::Script;
 use hal_simplicity::simplicity::elements::{
     self,
     bitcoin::PublicKey,
@@ -56,15 +57,53 @@ pub fn generate_keypair() -> (SecretKey, PublicKey) {
     (secret_key, public_key)
 }
 
+#[derive(Clone, Copy)]
+pub enum TransactionType {
+    P2SH,
+    P2WSH,
+    P2TR,
+}
+
+impl ToString for TransactionType {
+    fn to_string(&self) -> String {
+        match self {
+            Self::P2SH => "p2sh".to_string(),
+            Self::P2WSH => "p2wsh".to_string(),
+            Self::P2TR => "p2tr".to_string(),
+        }
+    }
+}
+
+impl From<&Script> for TransactionType {
+    fn from(value: &Script) -> Self {
+        if value.is_p2sh() {
+            return TransactionType::P2SH;
+        }
+
+        if value.is_v0_p2wsh() {
+            return TransactionType::P2WSH;
+        }
+
+        if value.is_v1_p2tr() {
+            return TransactionType::P2TR;
+        }
+
+        unimplemented!("Unsupported transaction type")
+    }
+}
+
+/// Generate a 2-of-2 multisig address from a list of public keys
+/// Returns the address and the redeem script
 pub fn generate_2of2_multisig_address_elements(
     pubkeys: &[PublicKey],
     address_params: &'static elements::AddressParams,
-    use_p2sh: bool,
+    tx_ty: TransactionType,
 ) -> Result<(elements::Address, elements::script::Script), UtilsError> {
     if pubkeys.len() != 2 {
         return Err(UtilsError::InvalidPublicKeyCount(pubkeys.len()));
     }
 
+    // Build the 2-of-2 multisig script
     let redeem_script = elements::script::Builder::new()
         .push_int(2)
         .push_key(&pubkeys[0])
@@ -73,10 +112,10 @@ pub fn generate_2of2_multisig_address_elements(
         .push_opcode(elements::opcodes::all::OP_CHECKMULTISIG)
         .into_script();
 
-    let address = if use_p2sh {
-        elements::Address::p2sh(&redeem_script, None, address_params)
-    } else {
-        elements::Address::p2wsh(&redeem_script, None, address_params)
+    let address = match tx_ty {
+        TransactionType::P2SH => elements::Address::p2sh(&redeem_script, None, address_params),
+        TransactionType::P2WSH => elements::Address::p2wsh(&redeem_script, None, address_params),
+        _ => unreachable!("P2TR case handled separately"),
     };
 
     Ok((address, redeem_script))
@@ -100,6 +139,7 @@ pub fn generate_2of2_multisig_address_bitcoin(
         .push_opcode(bitcoin::opcodes::all::OP_CHECKMULTISIG)
         .into_script();
 
+    // Create the P2WSH address from the redeem script
     let address = bitcoin::address::Address::p2wsh(&redeem_script, network);
 
     Ok((address, redeem_script))
@@ -133,7 +173,7 @@ mod tests {
         let result = generate_2of2_multisig_address_elements(
             &pubkeys,
             &elements::AddressParams::ELEMENTS,
-            false,
+            TransactionType::P2WSH,
         );
 
         assert!(result.is_ok());
@@ -154,7 +194,7 @@ mod tests {
         let result = generate_2of2_multisig_address_elements(
             &pubkeys,
             &elements::AddressParams::ELEMENTS,
-            false,
+            TransactionType::P2WSH,
         );
 
         assert!(result.is_err());

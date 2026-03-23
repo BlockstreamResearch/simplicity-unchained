@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use validator::Validate;
 
-use simplicity_unchained_core::runner::SimplicityRunner;
+use simplicity_unchained_core::{runner::SimplicityRunner, utils::TransactionType};
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
@@ -130,67 +130,62 @@ fn sign_pset_internal(
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
-    let tx = pset
-        .extract_tx()
-        .map_err(|e| format!("Failed to extract transaction: {}", e))?;
-
-    // precalculate inside new scope to prevent script cloning because pset will be mutually borrowed
-    let (is_p2sh, is_p2wsh, is_p2tr) = {
-        let script_pubkey = &pset.inputs()[request.input_index]
-            .witness_utxo
-            .as_ref()
-            .ok_or_else(|| format!("Missing witness_utxo for input {}", request.input_index))?
-            .script_pubkey;
-        (
-            script_pubkey.is_p2sh(),
-            script_pubkey.is_v0_p2wsh(),
-            script_pubkey.is_v1_p2tr(),
-        )
-    };
-
     let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
     let tweaked_keypair = untweaked_keypair.tap_tweak(
         &*state.secp,
         Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
     );
 
-    let (sig_bytes, partial_sigs_count) = if is_p2sh || is_p2wsh {
-        let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
-        let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
-            tweaked_public_key.into_inner(),
-            tweaked_parity,
-        ));
+    let tx = pset
+        .extract_tx()
+        .map_err(|e| format!("Failed to extract transaction: {}", e))?;
 
-        let sig = sign_p2wsh_p2sh(
-            is_p2sh,
-            state,
-            &mut pset,
-            &tx,
-            &redeem_script,
-            public_key,
-            &tweaked_keypair,
-            request.input_index,
-        )?;
+    let script_pubkey = &pset.inputs()[request.input_index]
+        .witness_utxo
+        .as_ref()
+        .ok_or_else(|| format!("Missing witness_utxo for input {}", request.input_index))?
+        .script_pubkey;
 
-        let count = pset.inputs()[request.input_index].partial_sigs.len();
-        (sig, count)
-    } else if is_p2tr {
-        let sig = sign_p2tr(state, &mut pset, &tx, &tweaked_keypair, request.input_index)?;
-        let count = pset.inputs()[request.input_index].partial_sigs.len();
-        (sig, count)
-    } else {
-        return Err("Unsupported script type".to_string());
+    let tx_ty = TransactionType::from(script_pubkey);
+    let (sig_bytes, partial_sigs_count) = match tx_ty {
+        TransactionType::P2SH | TransactionType::P2WSH => {
+            let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+            let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+                tweaked_public_key.into_inner(),
+                tweaked_parity,
+            ));
+
+            let sig = sign_p2wsh_p2sh(
+                state,
+                &mut pset,
+                &tx,
+                &redeem_script,
+                public_key,
+                &tweaked_keypair,
+                request.input_index,
+                tx_ty,
+            )?;
+
+            let count = pset.inputs()[request.input_index].partial_sigs.len();
+            (sig, count)
+        }
+        TransactionType::P2TR => {
+            let sig = sign_p2tr(state, &mut pset, &tx, &tweaked_keypair, request.input_index)?;
+            let count = pset.inputs()[request.input_index].partial_sigs.len();
+            (sig, count)
+        }
     };
 
-    let public_key_hex = if is_p2tr {
-        String::new()
-    } else {
-        let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
-        let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
-            tweaked_public_key.into_inner(),
-            tweaked_parity,
-        ));
-        hex::encode(public_key.to_bytes())
+    let public_key_hex = match tx_ty {
+        TransactionType::P2SH | TransactionType::P2WSH => {
+            let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+            let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+                tweaked_public_key.into_inner(),
+                tweaked_parity,
+            ));
+            hex::encode(public_key.to_bytes())
+        }
+        TransactionType::P2TR => String::new(),
     };
 
     Ok(SignPsetResponse {
@@ -205,7 +200,6 @@ fn sign_pset_internal(
 }
 
 fn sign_p2wsh_p2sh(
-    use_legacy: bool,
     state: &SignerState,
     pset: &mut PartiallySignedTransaction,
     tx: &Transaction,
@@ -213,24 +207,29 @@ fn sign_p2wsh_p2sh(
     public_key: PublicKey,
     tweaked_keypair: &TweakedKeypair,
     input_index: usize,
+    tx_type: TransactionType,
 ) -> Result<Vec<u8>, String> {
-    let sighash = if use_legacy {
-        let sighash_cache = SighashCache::new(tx);
-        sighash_cache.legacy_sighash(input_index, redeem_script, EcdsaSighashType::All)
-    } else {
-        let prev_value = pset.inputs()[input_index]
-            .witness_utxo
-            .as_ref()
-            .ok_or_else(|| format!("Missing witness UTXO for input {}", input_index))?
-            .value;
+    let sighash = match tx_type {
+        TransactionType::P2SH => {
+            let sighash_cache = SighashCache::new(tx);
+            sighash_cache.legacy_sighash(input_index, redeem_script, EcdsaSighashType::All)
+        }
+        TransactionType::P2WSH => {
+            let prev_value = pset.inputs()[input_index]
+                .witness_utxo
+                .as_ref()
+                .ok_or_else(|| format!("Missing witness UTXO for input {}", input_index))?
+                .value;
 
-        let mut sighash_cache = SighashCache::new(tx);
-        sighash_cache.segwitv0_sighash(
-            input_index,
-            redeem_script,
-            prev_value,
-            EcdsaSighashType::All,
-        )
+            let mut sighash_cache = SighashCache::new(tx);
+            sighash_cache.segwitv0_sighash(
+                input_index,
+                redeem_script,
+                prev_value,
+                EcdsaSighashType::All,
+            )
+        }
+        _ => unreachable!("Other types handled separately"),
     };
 
     let msg = Message::from_digest(sighash.to_byte_array());
@@ -244,10 +243,10 @@ fn sign_p2wsh_p2sh(
     let input = &mut pset.inputs_mut()[input_index];
     input.partial_sigs.insert(public_key, sig_bytes.clone());
 
-    let input_script = if use_legacy {
-        &mut input.redeem_script
-    } else {
-        &mut input.witness_script
+    let input_script = match tx_type {
+        TransactionType::P2SH => &mut input.redeem_script,
+        TransactionType::P2WSH => &mut input.witness_script,
+        _ => unreachable!("Other types handled separately"),
     };
 
     if input_script.is_none() {
@@ -286,16 +285,6 @@ fn sign_p2tr(
 
     let msg = Message::from_digest(sighash.to_byte_array());
     let signature = state.secp.sign_schnorr(&msg, &tweaked_keypair.to_inner());
-
-    eprintln!("genesis_hash: {}", state.elements_network.genesis_hash());
-    eprintln!("sighash: {}", hex::encode(sighash.to_byte_array()));
-
-    let (tweaked_xonly, _) = tweaked_keypair.public_parts();
-    eprintln!(
-        "tweaked_xonly used for signing: {}",
-        hex::encode(tweaked_xonly.as_inner().serialize())
-    );
-    eprintln!("sig: {}", hex::encode(signature.as_ref()));
 
     // 64-byte raw Schnorr signature
     let sig_bytes = signature.as_ref().to_vec();

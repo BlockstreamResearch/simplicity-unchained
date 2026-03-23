@@ -10,6 +10,7 @@ use hal_simplicity::simplicity::elements::{
     sighash::SighashCache,
 };
 use serde_json::json;
+use simplicity_unchained_core::utils::TransactionType;
 
 pub fn execute(
     pset_hex: &str,
@@ -52,31 +53,34 @@ pub fn execute(
 
     let pset_input = &pset.inputs()[input_index];
 
-    let script_pubkey = pset_input
+    let script_pubkey = &pset_input
         .witness_utxo
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Missing witness UTXO for input {}", input_index))?
         .script_pubkey
         .clone();
+    let tx_ty = TransactionType::from(script_pubkey);
 
     let prev_value = pset_input.witness_utxo.as_ref().unwrap().value;
 
     let mut sighash_cache = SighashCache::new(&tx);
 
-    let sighash = if script_pubkey.is_p2sh() {
-        sighash_cache.legacy_sighash(input_index, &redeem_script, EcdsaSighashType::All)
-    } else if script_pubkey.is_v0_p2wsh() {
-        sighash_cache.segwitv0_sighash(
+    let sighash = match tx_ty {
+        TransactionType::P2SH => {
+            sighash_cache.legacy_sighash(input_index, &redeem_script, EcdsaSighashType::All)
+        }
+        TransactionType::P2WSH => sighash_cache.segwitv0_sighash(
             input_index,
             &redeem_script,
             prev_value,
             EcdsaSighashType::All,
-        )
-    } else {
-        return Err(anyhow::anyhow!(
-            "Unsupported script type for tx sign: {}",
-            hex::encode(script_pubkey.as_bytes())
-        ));
+        ),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported script type for tx sign: {}",
+                hex::encode(script_pubkey.as_bytes())
+            ));
+        }
     };
 
     let msg = Message::from_digest(sighash.to_byte_array());
@@ -85,6 +89,7 @@ pub fn execute(
     let mut sig_bytes = signature.serialize_der().to_vec();
     sig_bytes.push(EcdsaSighashType::All.as_u32() as u8);
 
+    // Add signature to PSET
     let input = &mut pset.inputs_mut()[input_index];
     input.partial_sigs.insert(public_key, sig_bytes.clone());
 

@@ -5,7 +5,8 @@ use hal_simplicity::simplicity::bitcoin;
 use hal_simplicity::simplicity::elements::{AddressParams, bitcoin::PublicKey};
 
 use simplicity_unchained_core::utils::{
-    generate_2of2_multisig_address_bitcoin, generate_2of2_multisig_address_elements,
+    TransactionType, generate_2of2_multisig_address_bitcoin,
+    generate_2of2_multisig_address_elements,
 };
 
 pub fn execute(pubkey1: &str, pubkey2: &str, network: &str, script_type: &str) -> Result<()> {
@@ -17,9 +18,9 @@ pub fn execute(pubkey1: &str, pubkey2: &str, network: &str, script_type: &str) -
 
     let pubkeys = vec![pk1, pk2];
 
-    let use_p2sh = match script_type {
-        "p2sh" => true,
-        "p2wsh" => false,
+    let address_ty = match script_type {
+        "p2sh" => TransactionType::P2SH,
+        "p2wsh" => TransactionType::P2WSH,
         _ => {
             return Err(anyhow::anyhow!(
                 "Unsupported script type: {}. Supported types are: p2sh, p2wsh",
@@ -29,13 +30,13 @@ pub fn execute(pubkey1: &str, pubkey2: &str, network: &str, script_type: &str) -
     };
 
     if let Ok(network) = ElementsNetwork::try_from(network) {
-        let output = execute_over_elements(&pubkeys, network, use_p2sh)?;
+        let output = execute_over_elements(&pubkeys, network, address_ty)?;
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
 
     if let Ok(network) = BitcoinNetwork::try_from(network) {
-        let output = execute_over_bitcoin(&pubkeys, network, use_p2sh)?;
+        let output = execute_over_bitcoin(&pubkeys, network, address_ty)?;
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
@@ -49,7 +50,7 @@ pub fn execute(pubkey1: &str, pubkey2: &str, network: &str, script_type: &str) -
 fn execute_over_elements(
     pubkeys: &[PublicKey],
     network: ElementsNetwork,
-    use_p2sh: bool,
+    address_ty: TransactionType,
 ) -> Result<serde_json::Value> {
     let params = match network {
         ElementsNetwork::Elements => &AddressParams::ELEMENTS,
@@ -58,18 +59,18 @@ fn execute_over_elements(
     };
 
     let (address, redeem_script) =
-        generate_2of2_multisig_address_elements(pubkeys, params, use_p2sh)?;
+        generate_2of2_multisig_address_elements(pubkeys, params, address_ty)?;
     Ok(json!({
         "address": address.to_string(),
         "redeem_script": hex::encode(redeem_script.to_bytes()),
-        "script_type": if use_p2sh { "p2sh" } else { "p2wsh" },
+        "script_type": address_ty.to_string()
     }))
 }
 
 fn execute_over_bitcoin(
     pubkeys: &[PublicKey],
     network: BitcoinNetwork,
-    _use_p2sh: bool,
+    _address_ty: TransactionType,
 ) -> Result<serde_json::Value> {
     let network = match network {
         BitcoinNetwork::Bitcoin => bitcoin::Network::Bitcoin,

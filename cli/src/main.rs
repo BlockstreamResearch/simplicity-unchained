@@ -67,10 +67,6 @@ enum AddressCommands {
         #[arg(short, long)]
         pubkey: String,
 
-        /// Public key in hex format (the tweaked co-signer key)
-        #[arg(short, long)]
-        cmr: String,
-
         /// Network (elements, liquid, liquid_testnet)
         #[arg(short, long, default_value = "elements")]
         network: String,
@@ -188,12 +184,8 @@ fn main() -> Result<()> {
             } => {
                 commands::address::multisig::execute(&pubkey1, &pubkey2, &network, &type_)?;
             }
-            AddressCommands::P2tr {
-                pubkey,
-                cmr,
-                network,
-            } => {
-                commands::address::p2tr::execute(&pubkey, &cmr, &network)?;
+            AddressCommands::P2tr { pubkey, network } => {
+                commands::address::p2tr::execute(&pubkey, &network)?;
             }
         },
 

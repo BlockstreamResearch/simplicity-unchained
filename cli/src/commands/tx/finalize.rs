@@ -7,6 +7,7 @@ use hal_simplicity::simplicity::elements::{
     script::{Builder, Script},
 };
 use serde_json::json;
+use simplicity_unchained_core::utils::TransactionType;
 
 pub fn execute(pset_hex: &str) -> Result<()> {
     let pset_bytes = hex::decode(pset_hex).context("Failed to decode PSET hex")?;
@@ -17,41 +18,23 @@ pub fn execute(pset_hex: &str) -> Result<()> {
         .extract_tx()
         .context("Failed to extract transaction from PSET")?;
 
+    // For each input, build the witness from partial signatures
     for (i, input) in pset.inputs().iter().enumerate() {
-        let (is_p2sh, is_p2wsh, is_p2tr) = {
-            let script_pubkey = &input
-                .witness_utxo
-                .as_ref()
-                .ok_or_else(|| anyhow!("Input {} missing witness_utxo", i))?
-                .script_pubkey;
-            (
-                script_pubkey.is_p2sh(),
-                script_pubkey.is_v0_p2wsh(),
-                script_pubkey.is_v1_p2tr(),
-            )
-        };
-        if is_p2wsh {
-            finalize_p2wsh(&mut tx, i, input)?;
-        } else if is_p2sh {
-            finalize_p2sh(&mut tx, i, input)?;
-        } else if is_p2tr {
-            finalize_p2tr(&mut tx, i, input)?;
-        } else {
-            return Err(anyhow!(
-                "Input {} has unsupported script type: {}",
-                i,
-                hex::encode(
-                    input
-                        .witness_utxo
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("Input {} missing witness_utxo", i))?
-                        .script_pubkey
-                        .as_bytes()
-                )
-            ));
+        let script_pubkey = &input
+            .witness_utxo
+            .as_ref()
+            .ok_or_else(|| anyhow!("Input {} missing witness_utxo", i))?
+            .script_pubkey;
+        let tx_ty = TransactionType::from(script_pubkey);
+
+        match tx_ty {
+            TransactionType::P2SH => finalize_p2sh(&mut tx, i, input)?,
+            TransactionType::P2WSH => finalize_p2wsh(&mut tx, i, input)?,
+            TransactionType::P2TR => finalize_p2tr(&mut tx, i, input)?,
         }
     }
 
+    // Verify all inputs have witnesses
     let all_finalized = tx
         .input
         .iter()
@@ -118,6 +101,7 @@ fn extract_ordered_sigs(
         .collect()
 }
 
+/// Extract public keys from the witness script (2-of-2 multisig format: OP_2 <pk1> <pk2> OP_2 OP_CHECKMULTISIG)
 fn extract_pubkeys_from_multisig(script: &Script, input_index: usize) -> Result<Vec<PublicKey>> {
     let script_bytes = script.as_bytes();
     let mut pubkeys = Vec::new();
@@ -170,10 +154,6 @@ fn finalize_p2sh(tx: &mut Transaction, i: usize, input: &pset::Input) -> Result<
 
     let sigs = extract_ordered_sigs(redeem_script, &input.partial_sigs, i)?;
 
-    eprintln!("sig[0]: {}", hex::encode(&sigs[0]));
-    eprintln!("sig[1]: {}", hex::encode(&sigs[1]));
-    eprintln!("redeem_script: {}", hex::encode(redeem_script.as_bytes()));
-
     let mut builder = Builder::new();
     builder = builder.push_opcode(elements::opcodes::all::OP_PUSHBYTES_0);
     for sig in &sigs {
@@ -182,11 +162,6 @@ fn finalize_p2sh(tx: &mut Transaction, i: usize, input: &pset::Input) -> Result<
     builder = builder.push_slice(redeem_script.as_bytes());
 
     tx.input[i].script_sig = builder.into_script();
-
-    eprintln!(
-        "final scriptSig: {}",
-        hex::encode(tx.input[i].script_sig.as_bytes())
-    );
 
     Ok(())
 }
