@@ -36,6 +36,7 @@ pub struct TweakRequest {
 pub struct TweakResponse {
     pub cmr_hex: String,
     pub tweaked_public_key_hex: String,
+    pub untweaked_public_key_hex: String,
 }
 
 pub async fn get_tweaked_key(
@@ -94,13 +95,20 @@ fn get_tweaked_key_internal(
 
     // Create untweaked keypair and tweak it with the CMR
     let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
+
+    // Extract untweaked public key before tweaking
+    let (untweaked_xonly, untweaked_parity) = untweaked_keypair.x_only_public_key();
+    let untweaked_public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+        untweaked_xonly,
+        untweaked_parity,
+    ));
+
     let tweaked_keypair = untweaked_keypair.tap_tweak(
         &*state.secp,
         Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
     );
 
     let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
-
     let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
         tweaked_public_key.into_inner(),
         tweaked_parity,
@@ -109,6 +117,7 @@ fn get_tweaked_key_internal(
     Ok(TweakResponse {
         cmr_hex: hex::encode(cmr.to_byte_array()),
         tweaked_public_key_hex: hex::encode(public_key.to_bytes()),
+        untweaked_public_key_hex: hex::encode(untweaked_public_key.to_bytes()),
     })
 }
 

@@ -42,7 +42,7 @@ pub struct SignPsetRequest {
     pub input_index: usize,
 
     #[validate(custom(function = "validation::validate_redeem_script"))]
-    pub redeem_script_hex: String,
+    pub redeem_script_hex: Option<String>,
 
     #[validate(length(min = 1))]
     pub program: String,
@@ -109,8 +109,14 @@ fn sign_pset_internal(
         ));
     }
 
-    let redeem_script_bytes = hex::decode(&request.redeem_script_hex)
-        .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
+    let redeem_script_bytes = match request.redeem_script_hex {
+        Some(str) => {
+            let bytes = hex::decode(str)
+                .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
+            Script::from(bytes)
+        }
+        None => Script::new(),
+    };
 
     let redeem_script = Script::from(redeem_script_bytes);
 
@@ -123,12 +129,6 @@ fn sign_pset_internal(
         state.elements_network.clone(),
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
-
-    let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
-    let tweaked_keypair = untweaked_keypair.tap_tweak(
-        &*state.secp,
-        Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
-    );
 
     let tx = pset
         .extract_tx()
@@ -147,6 +147,12 @@ fn sign_pset_internal(
             script_pubkey.is_v1_p2tr(),
         )
     };
+
+    let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
+    let tweaked_keypair = untweaked_keypair.tap_tweak(
+        &*state.secp,
+        Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
+    );
 
     let (sig_bytes, partial_sigs_count) = if is_p2sh || is_p2wsh {
         let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
@@ -281,6 +287,16 @@ fn sign_p2tr(
     let msg = Message::from_digest(sighash.to_byte_array());
     let signature = state.secp.sign_schnorr(&msg, &tweaked_keypair.to_inner());
 
+    eprintln!("genesis_hash: {}", state.elements_network.genesis_hash());
+    eprintln!("sighash: {}", hex::encode(sighash.to_byte_array()));
+
+    let (tweaked_xonly, _) = tweaked_keypair.public_parts();
+    eprintln!(
+        "tweaked_xonly used for signing: {}",
+        hex::encode(tweaked_xonly.as_inner().serialize())
+    );
+    eprintln!("sig: {}", hex::encode(signature.as_ref()));
+
     // 64-byte raw Schnorr signature
     let sig_bytes = signature.as_ref().to_vec();
 
@@ -411,7 +427,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -459,7 +475,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -504,7 +520,7 @@ mod tests {
             pset_hex,
             input_index: 0,
             // redeem_script is only used for Simplicity validation, not the spending script
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -535,7 +551,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex: "invalid_hex!!!".to_string(),
             input_index: 0,
-            redeem_script_hex: "".to_string(),
+            redeem_script_hex: Some("".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -555,7 +571,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex: invalid_data,
             input_index: 0,
-            redeem_script_hex: "".to_string(),
+            redeem_script_hex: Some("".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -582,7 +598,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 999, // Out of bounds
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -611,7 +627,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: "invalid_hex!!!".to_string(),
+            redeem_script_hex: Some("invalid_hex!!!".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -643,7 +659,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: program.clone(),
             witness: Some("".to_string()),
         };
@@ -728,7 +744,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: program.clone(),
             witness: Some("".to_string()),
         };
@@ -817,7 +833,7 @@ mod tests {
         let valid_request = SignPsetRequest {
             pset_hex: "0000000000".to_string(),
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -827,7 +843,7 @@ mod tests {
         let invalid_request = SignPsetRequest {
             pset_hex: "".to_string(),
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -846,7 +862,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: "abcd".to_string(),
+            redeem_script_hex: Some("abcd".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };

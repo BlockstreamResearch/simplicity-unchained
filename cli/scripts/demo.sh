@@ -46,7 +46,6 @@ PROGRAM="zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA"
 WITNESS=""
 
 NETWORK="liquid_testnet"
-KEYPAIR_FILE=".keypair.json"
 
 echo "==== Step 0: Get Tweaked Public Key for Simplicity Program ===="
 TWEAK_REQUEST=$(jq -n --arg program "$PROGRAM" '{program: $program}')
@@ -56,7 +55,12 @@ TWEAK_RESPONSE=$(curl -s -X POST http://localhost:30431/simplicity-unchained/twe
   -d "$TWEAK_REQUEST")
 
 COSIGNER_PUBKEY=$(echo "$TWEAK_RESPONSE" | jq -r '.tweaked_public_key_hex')
-echo "Tweaked public key (Co-signer): $COSIGNER_PUBKEY"
+COSIGNER_PUBKEY_UNTWEAKED=$(echo "$TWEAK_RESPONSE" | jq -r '.untweaked_public_key_hex')
+CMR=$(echo "$TWEAK_RESPONSE" | jq -r '.cmr_hex')
+
+echo "Untweaked public key (Co-signer): $COSIGNER_PUBKEY_UNTWEAKED"
+echo "Tweaked public key (Co-signer):   $COSIGNER_PUBKEY"
+echo "CMR:                              $CMR"
 echo
 
 echo "==== Step 1: Generate User Keypair ===="
@@ -90,7 +94,8 @@ case "$SPEND_TYPE" in
     ;;
   p2tr)
     ADDRESS_DATA=$(cargo run --quiet -- address p2tr \
-      --pubkey $COSIGNER_PUBKEY \
+      --pubkey $COSIGNER_PUBKEY_UNTWEAKED \
+      --cmr $CMR \
       --network $NETWORK)
     REDEEM_SCRIPT=""
     ;;
@@ -124,12 +129,23 @@ echo
 echo "==== Step 5: First Signature (Co-signer) ===="
 echo "Calling sign service at http://localhost:30431/simplicity-unchained/sign/pset..."
 
-SIGN_REQUEST=$(jq -n \
-  --arg pset "$PSET_HEX" \
-  --arg redeem "$REDEEM_SCRIPT" \
-  --arg program "$PROGRAM" \
-  --arg witness "$WITNESS" \
-  '{pset_hex: $pset, redeem_script_hex: $redeem, input_index: 0, program: $program, witness: $witness}')
+case "$SPEND_TYPE" in
+  p2tr)
+    SIGN_REQUEST=$(jq -n \
+      --arg pset "$PSET_HEX" \
+      --arg program "$PROGRAM" \
+      --arg witness "$WITNESS" \
+      '{pset_hex: $pset, input_index: 0, program: $program, witness: $witness}')
+    ;;
+  *)
+    SIGN_REQUEST=$(jq -n \
+      --arg pset "$PSET_HEX" \
+      --arg redeem "$REDEEM_SCRIPT" \
+      --arg program "$PROGRAM" \
+      --arg witness "$WITNESS" \
+      '{pset_hex: $pset, redeem_script_hex: $redeem, input_index: 0, program: $program, witness: $witness}')
+    ;;
+esac
 
 PSET_SIGN1_DATA=$(curl -s -X POST http://localhost:30431/simplicity-unchained/sign/pset \
   -H "Content-Type: application/json" \
