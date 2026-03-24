@@ -10,7 +10,9 @@ The primary target is **Bitcoin** (including Bitcoin testnets), with additional 
 
 ## Project Structure
 
-- [`core`](core/README.md): Contains the fundamental logic for executing Simplicity programs and interacting with Bitcoin and Elements environments. (Note: In the future, parts of this logic may be migrated to [hal-simplicity](https://github.com/BlockstreamResearch/hal-simplicity))
+- [`core`](core/README.md): Contains the fundamental logic for executing Simplicity programs, interacting with Bitcoin and Elements environments and interface for loading custom jet implementations from dynamic libraries. (Note: In the future, parts of this logic may be migrated to [hal-simplicity](https://github.com/BlockstreamResearch/hal-simplicity))
+
+- [`jet_plugins`](jet_plugins/README.md): Procedural macro for deriving Jet trait for given custom jets alongside with it's C FFI. Currently supports extending Bitcoin and Elements jets.
 
 - [`service`](service/README.md): Implements a web service providing endpoints to interact with Simplicity Unchained. Currently, it supports a 2-of-2 multisig co-signing flow on Bitcoin and Elements, triggered by the successful execution of a Simplicity program.
 

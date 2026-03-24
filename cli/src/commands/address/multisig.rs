@@ -80,11 +80,11 @@ fn execute_over_bitcoin(
         BitcoinNetwork::Regtest => bitcoin::Network::Regtest,
     };
 
-    let (address, redeem_script) = generate_2of2_multisig_address_bitcoin(&pubkeys, network)?;
+    let (address, redeem_script) = generate_2of2_multisig_address_bitcoin(pubkeys, network)?;
 
     Ok(json!({
         "address": address.to_string(),
-        "redeem_script": hex::encode(&redeem_script.to_bytes()),
+        "redeem_script": hex::encode(redeem_script.to_bytes()),
     }))
 }
 

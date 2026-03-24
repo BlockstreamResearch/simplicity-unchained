@@ -61,3 +61,8 @@ impl FromStr for BitcoinNetwork {
         }
     }
 }
+
+#[doc(hidden)]
+pub mod __simplicity {
+    pub use hal_simplicity::simplicity;
+}

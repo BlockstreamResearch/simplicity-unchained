@@ -45,6 +45,7 @@ pub struct SignerState {
     pub secp: Arc<Secp256k1<All>>,
     pub elements_network: ElementsNetwork,
     pub bitcoin_network: BitcoinNetwork,
+    pub has_custom_jets: bool,
 }
 
 impl SignerState {
@@ -59,11 +60,14 @@ impl SignerState {
         let secret_key = SecretKey::from_slice(&secret_key_bytes)
             .map_err(|e| format!("Invalid private key: {}", e))?;
 
+        let has_custom_jets = std::env::var("JET_DLL_PATH").is_ok();
+
         Ok(Self {
             secret_key,
             secp: Arc::new(Secp256k1::new()),
             elements_network,
             bitcoin_network,
+            has_custom_jets,
         })
     }
 }

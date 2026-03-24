@@ -16,20 +16,11 @@ use hal_simplicity::simplicity::jet::elements::ElementsEnv;
 
 use super::environments::UnchainedEnv;
 
-static C_JET_PTRS: LazyLock<
-    HashMap<
-        ElementsExtension,
-        &'static (
-                     dyn Fn(
-            &mut CFrameItem,
-            CFrameItem,
-            &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
-        ) -> bool
-                         + Send
-                         + Sync
-                 ),
-    >,
-> = LazyLock::new(|| build_c_jet_ptrs());
+type CJetPtr = dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<ElementsEnv<Arc<Transaction>>>) -> bool
+    + Send
+    + Sync;
+static C_JET_PTRS: LazyLock<HashMap<ElementsExtension, &'static CJetPtr>> =
+    LazyLock::new(|| build_c_jet_ptrs());
 
 // Local version of decode_bits macro that accepts expressions instead of just paths
 macro_rules! decode_bits {
@@ -103,30 +94,11 @@ impl ElementsExtension {
     }
 }
 
-fn build_c_jet_ptrs() -> HashMap<
-    ElementsExtension,
-    &'static (
-                 dyn Fn(
-        &mut CFrameItem,
-        CFrameItem,
-        &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
-    ) -> bool
-                     + Send
-                     + Sync
-             ),
-> {
+fn build_c_jet_ptrs() -> HashMap<ElementsExtension, &'static CJetPtr> {
     ElementsExtension::ALL
         .iter()
         .map(|jet| {
-            let boxed: Box<
-                dyn Fn(
-                        &mut CFrameItem,
-                        CFrameItem,
-                        &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
-                    ) -> bool
-                    + Send
-                    + Sync,
-            > = match jet {
+            let boxed: Box<CJetPtr> = match jet {
                 // hijacked elements jets
                 ElementsExtension::Elements(Elements::CheckLockDuration) => Box::new(
                     move |dst: &mut CFrameItem,
@@ -187,15 +159,7 @@ fn build_c_jet_ptrs() -> HashMap<
                     },
                 ),
             };
-            let leaked: &'static (
-                         dyn Fn(
-                &mut CFrameItem,
-                CFrameItem,
-                &UnchainedEnv<ElementsEnv<Arc<Transaction>>>,
-            ) -> bool
-                             + Send
-                             + Sync
-                     ) = Box::leak(boxed);
+            let leaked: &'static CJetPtr = Box::leak(boxed);
             (*jet, leaked)
         })
         .collect()
