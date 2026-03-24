@@ -110,7 +110,7 @@ fn sign_pset_internal(
         ));
     }
 
-    let redeem_script_bytes = match request.redeem_script_hex {
+    let redeem_script = match request.redeem_script_hex {
         Some(str) => {
             let bytes = hex::decode(str)
                 .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
@@ -119,15 +119,13 @@ fn sign_pset_internal(
         None => Script::new(),
     };
 
-    let redeem_script = Script::from(redeem_script_bytes);
-
     let cmr = SimplicityRunner::execute_elements(
         &request.program,
         request.witness.as_deref(),
         request.input_index,
         &pset,
         redeem_script.clone(),
-        state.elements_network.clone(),
+        state.elements_network,
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
@@ -150,18 +148,11 @@ fn sign_pset_internal(
     let tx_ty = TransactionType::from(script_pubkey);
     let (sig_bytes, partial_sigs_count) = match tx_ty {
         TransactionType::P2SH | TransactionType::P2WSH => {
-            let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
-            let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
-                tweaked_public_key.into_inner(),
-                tweaked_parity,
-            ));
-
             let sig = sign_p2wsh_p2sh(
                 state,
                 &mut pset,
                 &tx,
                 &redeem_script,
-                public_key,
                 &tweaked_keypair,
                 request.input_index,
                 tx_ty,
@@ -205,11 +196,15 @@ fn sign_p2wsh_p2sh(
     pset: &mut PartiallySignedTransaction,
     tx: &Transaction,
     redeem_script: &Script,
-    public_key: PublicKey,
     tweaked_keypair: &TweakedKeypair,
     input_index: usize,
     tx_type: TransactionType,
 ) -> Result<Vec<u8>, String> {
+    let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+    let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+        tweaked_public_key.into_inner(),
+        tweaked_parity,
+    ));
     let sighash = match tx_type {
         TransactionType::P2SH => {
             let sighash_cache = SighashCache::new(tx);

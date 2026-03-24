@@ -64,12 +64,12 @@ pub enum TransactionType {
     P2TR,
 }
 
-impl ToString for TransactionType {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for TransactionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::P2SH => "p2sh".to_string(),
-            Self::P2WSH => "p2wsh".to_string(),
-            Self::P2TR => "p2tr".to_string(),
+            Self::P2SH => write!(f, "p2sh"),
+            Self::P2WSH => write!(f, "p2wsh"),
+            Self::P2TR => write!(f, "p2tr"),
         }
     }
 }

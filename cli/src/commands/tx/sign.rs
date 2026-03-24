@@ -97,10 +97,8 @@ pub fn execute(
         if input.redeem_script.is_none() {
             input.redeem_script = Some(redeem_script.clone());
         }
-    } else if script_pubkey.is_v0_p2wsh() {
-        if input.witness_script.is_none() {
-            input.witness_script = Some(redeem_script.clone());
-        }
+    } else if script_pubkey.is_v0_p2wsh() && input.witness_script.is_none() {
+        input.witness_script = Some(redeem_script.clone());
     }
 
     let partial_sigs_count = pset.inputs()[input_index].partial_sigs.len();
