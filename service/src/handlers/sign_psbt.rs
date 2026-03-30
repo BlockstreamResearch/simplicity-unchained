@@ -193,12 +193,6 @@ fn sign_p2wsh_p2sh(
     input_index: usize,
     tx_type: TransactionType,
 ) -> Result<Vec<u8>, String> {
-    //let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
-    //let public_key = bitcoin::PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
-    //    tweaked_public_key.to_x_only_public_key(),
-    //    tweaked_parity,
-    //));
-
     let tweaked_private_key = bitcoin::key::PrivateKey::new(
         tweaked_keypair.to_keypair().secret_key(),
         state.bitcoin_network,

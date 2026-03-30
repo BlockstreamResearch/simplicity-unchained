@@ -17,7 +17,16 @@ esac
 echo "==== Spend type: $SPEND_TYPE ===="
 echo
 
+echo "==== Sanity Check: bitcoin-cli available? ===="
+if ! command -v bitcoin-cli &> /dev/null; then
+  echo "ERROR: bitcoin-cli not found in PATH"
+  exit 1
+fi
+echo "OK: bitcoin-cli found at $(which bitcoin-cli)"
+
 BTC="bitcoin-cli -regtest"
+
+# Simple Simplicity program that always returns true
 PROGRAM="zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA"
 WITNESS=""
 NETWORK="regtest"
