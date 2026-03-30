@@ -9,6 +9,8 @@ use simplicity_unchained_core::utils::{
     generate_2of2_multisig_address_elements,
 };
 
+use crate::commands::address::{BitcoinNetwork, ElementsNetwork};
+
 pub fn execute(pubkey1: &str, pubkey2: &str, network: &str, script_type: &str) -> Result<()> {
     let pk1_bytes = hex::decode(pubkey1).context("Failed to decode pubkey1")?;
     let pk2_bytes = hex::decode(pubkey2).context("Failed to decode pubkey2")?;
@@ -70,7 +72,7 @@ fn execute_over_elements(
 fn execute_over_bitcoin(
     pubkeys: &[PublicKey],
     network: BitcoinNetwork,
-    _address_ty: TransactionType,
+    address_ty: TransactionType,
 ) -> Result<serde_json::Value> {
     let network = match network {
         BitcoinNetwork::Bitcoin => bitcoin::Network::Bitcoin,
@@ -85,49 +87,6 @@ fn execute_over_bitcoin(
     Ok(json!({
         "address": address.to_string(),
         "redeem_script": hex::encode(redeem_script.to_bytes()),
+        "script_type": address_ty.to_string()
     }))
-}
-
-#[derive(Debug)]
-enum ElementsNetwork {
-    Elements,
-    Liquid,
-    LiquidTestnet,
-}
-
-impl TryFrom<&str> for ElementsNetwork {
-    type Error = anyhow::Error;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "elements" => Ok(ElementsNetwork::Elements),
-            "liquid" => Ok(ElementsNetwork::Liquid),
-            "liquid_testnet" => Ok(ElementsNetwork::LiquidTestnet),
-            _ => Err(anyhow::anyhow!("Unsupported elements network: {}", s)),
-        }
-    }
-}
-
-#[derive(Debug)]
-enum BitcoinNetwork {
-    Bitcoin,
-    Testnet,
-    Testnet4,
-    Signet,
-    Regtest,
-}
-
-impl TryFrom<&str> for BitcoinNetwork {
-    type Error = anyhow::Error;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "bitcoin" => Ok(BitcoinNetwork::Bitcoin),
-            "testnet" => Ok(BitcoinNetwork::Testnet),
-            "testnet4" => Ok(BitcoinNetwork::Testnet4),
-            "signet" => Ok(BitcoinNetwork::Signet),
-            "regtest" => Ok(BitcoinNetwork::Regtest),
-            _ => Err(anyhow::anyhow!("Unsupported bitcoin network: {}", s)),
-        }
-    }
 }

@@ -1,16 +1,11 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
-use hal_simplicity::{
-    bitcoin::secp256k1,
-    hal_simplicity::Program,
-    simplicity::elements::{
-        schnorr::{TapTweak, UntweakedKeypair},
-        taproot::TapNodeHash,
-    },
-};
+use hal_simplicity::bitcoin::key::{TapTweak, TweakedKeypair, UntweakedKeypair};
+use hal_simplicity::bitcoin::{self, secp256k1};
+use hal_simplicity::bitcoin::{TapNodeHash, Transaction, TxOut};
 
 use hal_simplicity::simplicity::bitcoin::{
-    EcdsaSighashType, PublicKey, hashes::Hash, psbt::Psbt, script::Script, sighash::SighashCache,
+    EcdsaSighashType, hashes::Hash, psbt::Psbt, script::Script, sighash::SighashCache,
 };
 
 use hal_simplicity::simplicity::elements::secp256k1_zkp::Message;
@@ -19,10 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use validator::Validate;
 
-use simplicity_unchained_core::{
-    jets::custom_jet::CustomJet,
-    runner::{RunnerError, SimplicityRunner},
-};
+use simplicity_unchained_core::{runner::SimplicityRunner, utils::TransactionType};
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
@@ -40,7 +32,7 @@ pub struct SignPsbtRequest {
     pub input_index: usize,
 
     #[validate(custom(function = "validation::validate_redeem_script"))]
-    pub redeem_script_hex: String,
+    pub redeem_script_hex: Option<String>,
 
     #[validate(length(min = 1))]
     pub program: String,
@@ -109,38 +101,24 @@ fn sign_psbt_internal(
         ));
     }
 
-    let redeem_script_bytes = hex::decode(&request.redeem_script_hex)
-        .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
-
-    let redeem_script = Script::from_bytes(&redeem_script_bytes).to_owned();
-    // Validate with Simplicity runner before signing
-
-    let cmr = if !state.has_custom_jets {
-        SimplicityRunner::execute_bitcoin(
-            &request.program,
-            request.witness.as_deref(),
-            request.input_index,
-            &psbt,
-            hal_simplicity::simplicity::elements::Script::from(redeem_script_bytes),
-            state.bitcoin_network,
-        )
-        .map_err(|e| format!("Simplicity execution failed: {}", e))?
-    } else {
-        let program =
-            Program::<CustomJet<()>>::from_str(&request.program, request.witness.as_deref())
-                .map_err(RunnerError::ProgramParse)
-                .map_err(|e| format!("Simplicity execution failed: {}", e))?;
-
-        SimplicityRunner::execute_custom(
-            program,
-            request.input_index,
-            &psbt,
-            hal_simplicity::simplicity::elements::Script::from(redeem_script_bytes),
-            (),
-            state.bitcoin_network,
-        )
-        .map_err(|e| format!("Simplicity execution failed: {}", e))?
+    let redeem_script = match request.redeem_script_hex {
+        Some(str) => {
+            let bytes = hex::decode(str)
+                .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
+            hal_simplicity::simplicity::elements::Script::from(bytes)
+        }
+        None => hal_simplicity::simplicity::elements::Script::new(),
     };
+
+    let cmr = SimplicityRunner::execute_bitcoin(
+        &request.program,
+        request.witness.as_deref(),
+        request.input_index,
+        &psbt,
+        redeem_script.clone(),
+        state.bitcoin_network,
+    )
+    .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
     let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
     let tweaked_keypair = untweaked_keypair.tap_tweak(
@@ -148,64 +126,175 @@ fn sign_psbt_internal(
         Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
     );
 
-    let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
-
-    let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
-        tweaked_public_key.into_inner(),
-        tweaked_parity,
-    ));
-
-    let psbt_input = &psbt.inputs[request.input_index];
-    let prev_value = psbt_input
+    let script_pubkey = psbt.inputs[request.input_index]
         .witness_utxo
         .as_ref()
-        .ok_or_else(|| format!("Missing witness UTXO for input {}", request.input_index))?
-        .value;
+        .ok_or_else(|| format!("Missing witness_utxo for input {}", request.input_index))?
+        .script_pubkey
+        .clone();
 
-    let tx = psbt.clone().extract_tx_unchecked_fee_rate();
+    let tx = psbt
+        .clone()
+        .extract_tx()
+        .map_err(|e| format!("Failed to extract transaction: {}", e))?;
 
-    // Compute sighash for P2WSH (SegWit v0)
-    let mut sighash_cache = SighashCache::new(&tx);
-    let sighash = sighash_cache
-        .p2wsh_signature_hash(
-            request.input_index,
-            &redeem_script,
-            prev_value,
-            EcdsaSighashType::All,
-        )
-        .map_err(|e| format!("Failed to compute sighash: {}", e))?;
+    let tx_ty = TransactionType::from(script_pubkey.as_script());
+    let (sig_bytes, partial_sigs_count) = match tx_ty {
+        TransactionType::P2SH | TransactionType::P2WSH => {
+            let sig = sign_p2wsh_p2sh(
+                state,
+                &mut psbt,
+                &tx,
+                hal_simplicity::bitcoin::Script::from_bytes(redeem_script.as_bytes()),
+                &tweaked_keypair,
+                request.input_index,
+                tx_ty,
+            )?;
 
-    // Sign the sighash
-    let msg = Message::from_digest(sighash.to_byte_array());
-    let signature = state
-        .secp
-        .sign_ecdsa(&msg, &tweaked_keypair.to_inner().secret_key());
-
-    let mut sig_bytes = signature.serialize_der().to_vec();
-    sig_bytes.push(EcdsaSighashType::All.to_u32() as u8);
-
-    // Convert to bitcoin's Signature type for PSBT
-    let bitcoin_sig = hal_simplicity::simplicity::bitcoin::ecdsa::Signature {
-        signature,
-        sighash_type: EcdsaSighashType::All,
+            let count = psbt.inputs[request.input_index].partial_sigs.len();
+            (sig, count)
+        }
+        TransactionType::P2TR => {
+            let sig = sign_p2tr(state, &mut psbt, &tx, &tweaked_keypair, request.input_index)?;
+            let count = psbt.inputs[request.input_index].partial_sigs.len();
+            (sig, count)
+        }
     };
 
-    let input = &mut psbt.inputs[request.input_index];
-    input.partial_sigs.insert(public_key, bitcoin_sig);
-
-    if input.witness_script.is_none() {
-        input.witness_script = Some(redeem_script);
-    }
-
-    let partial_sigs_count = psbt.inputs[request.input_index].partial_sigs.len();
+    let public_key_hex = match tx_ty {
+        TransactionType::P2SH | TransactionType::P2WSH => {
+            let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+            let public_key = bitcoin::PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+                tweaked_public_key.to_x_only_public_key(),
+                tweaked_parity,
+            ));
+            hex::encode(public_key.to_bytes())
+        }
+        TransactionType::P2TR => String::new(),
+    };
 
     Ok(SignPsbtResponse {
         psbt_hex: hex::encode(psbt.serialize()),
+        // NOTE: For P2TR, sig_bytes is 64 bytes
+        // For P2SH/P2WSH it is DER-encoded ECDSA + 1 sighash byte.
         signature_hex: hex::encode(&sig_bytes),
-        public_key_hex: hex::encode(public_key.to_bytes()),
+        public_key_hex,
         input_index: request.input_index,
         partial_sigs_count,
     })
+}
+
+fn sign_p2wsh_p2sh(
+    state: &SignerState,
+    psbt: &mut Psbt,
+    tx: &Transaction,
+    redeem_script: &Script,
+    tweaked_keypair: &TweakedKeypair,
+    input_index: usize,
+    tx_type: TransactionType,
+) -> Result<Vec<u8>, String> {
+    //let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+    //let public_key = bitcoin::PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+    //    tweaked_public_key.to_x_only_public_key(),
+    //    tweaked_parity,
+    //));
+
+    let tweaked_private_key = bitcoin::key::PrivateKey::new(
+        tweaked_keypair.to_keypair().secret_key(),
+        state.bitcoin_network,
+    );
+    let public_key = bitcoin::PublicKey::from_private_key(&state.secp, &tweaked_private_key);
+
+    let sighash = match tx_type {
+        TransactionType::P2SH => {
+            let sighash_cache = SighashCache::new(tx);
+            *sighash_cache
+                .legacy_signature_hash(input_index, redeem_script, EcdsaSighashType::All.to_u32())
+                .map_err(|e| e.to_string())?
+                .as_byte_array()
+        }
+        TransactionType::P2WSH => {
+            let prev_value = psbt.inputs[input_index]
+                .witness_utxo
+                .as_ref()
+                .ok_or_else(|| format!("Missing witness UTXO for input {}", input_index))?
+                .value;
+
+            let mut sighash_cache = SighashCache::new(tx);
+            *sighash_cache
+                .p2wsh_signature_hash(
+                    input_index,
+                    redeem_script,
+                    prev_value,
+                    EcdsaSighashType::All,
+                )
+                .map_err(|e| e.to_string())?
+                .as_byte_array()
+        }
+        _ => unreachable!("Other types handled separately"),
+    };
+
+    let msg = Message::from_digest(sighash);
+    let signature = hal_simplicity::bitcoin::ecdsa::Signature::sighash_all(
+        state
+            .secp
+            .sign_ecdsa(&msg, &tweaked_keypair.to_keypair().secret_key()),
+    );
+
+    let input = &mut psbt.inputs[input_index];
+    input.partial_sigs.insert(public_key, signature);
+
+    let input_script = match tx_type {
+        TransactionType::P2SH => &mut input.redeem_script,
+        TransactionType::P2WSH => &mut input.witness_script,
+        _ => unreachable!("Other types handled separately"),
+    };
+
+    if input_script.is_none() {
+        *input_script = Some(redeem_script.to_owned());
+    }
+
+    Ok(signature.to_vec())
+}
+
+fn sign_p2tr(
+    state: &SignerState,
+    psbt: &mut Psbt,
+    tx: &Transaction,
+    tweaked_keypair: &TweakedKeypair,
+    input_index: usize,
+) -> Result<Vec<u8>, String> {
+    let prevouts: Vec<TxOut> = psbt
+        .inputs
+        .iter()
+        .map(|i| {
+            i.witness_utxo
+                .clone()
+                .ok_or_else(|| "Missing witness_utxo for taproot input".to_string())
+        })
+        .collect::<Result<_, _>>()?;
+
+    let mut sighash_cache = SighashCache::new(tx);
+    let sighash = sighash_cache
+        .taproot_key_spend_signature_hash(
+            input_index,
+            &hal_simplicity::bitcoin::sighash::Prevouts::All(&prevouts),
+            hal_simplicity::bitcoin::TapSighashType::Default,
+        )
+        .map_err(|e| format!("Failed to compute taproot sighash: {}", e))?;
+
+    let msg = Message::from_digest(sighash.to_byte_array());
+    let signature = state.secp.sign_schnorr(&msg, &tweaked_keypair.to_keypair());
+
+    // 64-byte raw Schnorr signature
+    let sig_bytes = signature.as_ref().to_vec();
+
+    psbt.inputs[input_index].tap_key_sig = Some(hal_simplicity::bitcoin::taproot::Signature {
+        signature,
+        sighash_type: hal_simplicity::bitcoin::TapSighashType::Default,
+    });
+
+    Ok(sig_bytes)
 }
 
 #[cfg(test)]
@@ -213,6 +302,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use hal_simplicity::bitcoin::{self, WScriptHash};
     use hal_simplicity::hal_simplicity::Program;
     use hal_simplicity::simplicity::bitcoin::{
         NetworkKind, OutPoint, PrivateKey, Transaction, TxIn, TxOut, Txid,
@@ -240,7 +330,7 @@ mod tests {
     }
 
     fn create_2of2_multisig_script(state: &SignerState, key2: &SecretKey) -> ScriptBuf {
-        let pubkey1 = PublicKey::from_private_key(
+        let pubkey1 = bitcoin::PublicKey::from_private_key(
             &*state.secp,
             &PrivateKey {
                 compressed: true,
@@ -248,7 +338,7 @@ mod tests {
                 inner: state.secret_key,
             },
         );
-        let pubkey2 = PublicKey::from_private_key(
+        let pubkey2 = bitcoin::PublicKey::from_private_key(
             &*state.secp,
             &PrivateKey {
                 compressed: true,
@@ -290,13 +380,13 @@ mod tests {
         }
     }
 
-    fn create_test_psbt(tx: Transaction) -> Psbt {
+    fn create_test_psbt(tx: Transaction, script_pubkey: ScriptBuf) -> Psbt {
         let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
 
         // Add witness_utxo to the first input (required for SegWit v0)
         psbt.inputs[0].witness_utxo = Some(TxOut {
             value: hal_simplicity::simplicity::bitcoin::Amount::from_sat(100_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey,
         });
 
         psbt
@@ -309,7 +399,9 @@ mod tests {
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let psbt = create_test_psbt(tx);
+
+        let script_pubkey = bitcoin::ScriptBuf::new_p2wsh(&redeem_script.wscript_hash());
+        let psbt = create_test_psbt(tx, script_pubkey);
 
         let psbt_bytes = psbt.serialize();
         let psbt_hex = hex::encode(&psbt_bytes);
@@ -317,7 +409,7 @@ mod tests {
         let request = SignPsbtRequest {
             psbt_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -358,7 +450,7 @@ mod tests {
         let request = SignPsbtRequest {
             psbt_hex: "invalid_hex!!!".to_string(),
             input_index: 0,
-            redeem_script_hex: "".to_string(),
+            redeem_script_hex: Some("".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -378,7 +470,7 @@ mod tests {
         let request = SignPsbtRequest {
             psbt_hex: invalid_data,
             input_index: 0,
-            redeem_script_hex: "".to_string(),
+            redeem_script_hex: Some("".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -395,7 +487,9 @@ mod tests {
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let psbt = create_test_psbt(tx);
+
+        let script_pubkey = bitcoin::ScriptBuf::new_p2wsh(&redeem_script.wscript_hash());
+        let psbt = create_test_psbt(tx, script_pubkey);
 
         let psbt_bytes = psbt.serialize();
         let psbt_hex = hex::encode(&psbt_bytes);
@@ -403,7 +497,7 @@ mod tests {
         let request = SignPsbtRequest {
             psbt_hex,
             input_index: 99, // Out of bounds
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -418,7 +512,9 @@ mod tests {
         let state = create_test_signer_state();
 
         let tx = create_test_transaction();
-        let psbt = create_test_psbt(tx);
+
+        let script_pubkey = bitcoin::ScriptBuf::new_p2wsh(&WScriptHash::from_byte_array([0; 32]));
+        let psbt = create_test_psbt(tx, script_pubkey);
 
         let psbt_bytes = psbt.serialize();
         let psbt_hex = hex::encode(&psbt_bytes);
@@ -426,7 +522,7 @@ mod tests {
         let request = SignPsbtRequest {
             psbt_hex,
             input_index: 0,
-            redeem_script_hex: "invalid!!!".to_string(),
+            redeem_script_hex: Some("invalid!!!".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -447,7 +543,9 @@ mod tests {
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let psbt = create_test_psbt(tx.clone());
+
+        let script_pubkey = bitcoin::ScriptBuf::new_p2wsh(&redeem_script.wscript_hash());
+        let psbt = create_test_psbt(tx.clone(), script_pubkey);
 
         let psbt_bytes = psbt.serialize();
         let psbt_hex = hex::encode(&psbt_bytes);
@@ -457,7 +555,7 @@ mod tests {
         let request = SignPsbtRequest {
             psbt_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: program.clone(),
             witness: Some("".to_string()),
         };
@@ -480,8 +578,8 @@ mod tests {
 
         let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
 
-        let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
-            tweaked_public_key.into_inner(),
+        let public_key = bitcoin::PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+            tweaked_public_key.to_x_only_public_key(),
             tweaked_parity,
         ));
 
@@ -552,7 +650,7 @@ mod tests {
         let valid_request = SignPsbtRequest {
             psbt_hex: "70736574ff".to_string(), // Some valid hex
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -562,7 +660,7 @@ mod tests {
         let invalid_request = SignPsbtRequest {
             psbt_hex: "".to_string(),
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };

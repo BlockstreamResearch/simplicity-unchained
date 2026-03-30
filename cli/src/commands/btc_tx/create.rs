@@ -6,6 +6,7 @@ use bitcoin::{
     Address, Amount, Network, OutPoint, Transaction, TxIn, TxOut, psbt::Psbt, script::ScriptBuf,
 };
 
+use std::process::Command;
 use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
@@ -26,6 +27,9 @@ fn fetch_tx_output(txid: &str, vout: u32, network: &str) -> Result<TxOut> {
         "bitcoin" => format!("https://blockstream.info/api/tx/{}", txid),
         "testnet" => format!("https://blockstream.info/testnet/api/tx/{}", txid),
         "testnet4" => format!("https://mempool.space/testnet4/api/tx/{}", txid),
+        "regtest" => {
+            return fetch_tx_output_rpc(txid, vout);
+        }
         _ => return Err(anyhow!("Cannot fetch transaction for network: {}", network)),
     };
 
@@ -84,11 +88,44 @@ fn fetch_tx_output(txid: &str, vout: u32, network: &str) -> Result<TxOut> {
     ))
 }
 
+fn fetch_tx_output_rpc(txid: &str, vout: u32) -> Result<TxOut> {
+    let output = Command::new("bitcoin-cli")
+        .args(["-regtest", "getrawtransaction", txid, "true"])
+        .output()
+        .context("failed to call bitcoin-cli")?;
+
+    if !output.status.success() {
+        return Err(anyhow!("bitcoin-cli failed"));
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).context("invalid JSON")?;
+
+    let vout_obj = json["vout"]
+        .get(vout as usize)
+        .ok_or_else(|| anyhow!("vout not found"))?;
+
+    let value_btc = vout_obj["value"]
+        .as_f64()
+        .ok_or_else(|| anyhow!("no value"))?;
+
+    let script_hex = vout_obj["scriptPubKey"]["hex"]
+        .as_str()
+        .ok_or_else(|| anyhow!("no script"))?;
+
+    let script_bytes = hex::decode(script_hex)?;
+
+    Ok(TxOut {
+        value: Amount::from_btc(value_btc)?,
+        script_pubkey: ScriptBuf::from_bytes(script_bytes),
+    })
+}
+
 fn get_network_kind(network: &str) -> Result<Network> {
     match network {
         "bitcoin" => Ok(Network::Bitcoin),
         "testnet" => Ok(Network::Testnet),
         "testnet4" => Ok(Network::Testnet4),
+        "regtest" => Ok(Network::Regtest),
         _ => Err(anyhow!(
             "Unsupported network '{}'. Supported networks are: bitcoin, testnet.",
             network

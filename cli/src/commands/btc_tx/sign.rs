@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
+use hal_simplicity::bitcoin::ScriptBuf;
 use hal_simplicity::simplicity::bitcoin::{
-    EcdsaSighashType, NetworkKind, PrivateKey, PublicKey, hashes::Hash, psbt::Psbt, script::Script,
-    sighash::SighashCache,
+    EcdsaSighashType, PublicKey, hashes::Hash, psbt::Psbt, sighash::SighashCache,
 };
 use hal_simplicity::simplicity::elements::secp256k1_zkp::{Message, Secp256k1, SecretKey};
 use serde_json::json;
+use simplicity_unchained_core::utils::TransactionType;
 
 pub fn execute(
     psbt_hex: &str,
@@ -29,65 +30,78 @@ pub fn execute(
 
     let redeem_script_bytes =
         hex::decode(redeem_script_hex).context("Failed to decode redeem script hex")?;
-    let redeem_script = Script::from_bytes(&redeem_script_bytes).to_owned();
+    let redeem_script = ScriptBuf::from(redeem_script_bytes);
 
     let secp = Secp256k1::new();
 
     let public_key = PublicKey::from_private_key(
         &secp,
-        &PrivateKey {
+        &hal_simplicity::simplicity::elements::bitcoin::PrivateKey {
             compressed: true,
-            network: NetworkKind::Main,
+            network: hal_simplicity::simplicity::elements::bitcoin::NetworkKind::Main,
             inner: secret_key,
         },
     );
 
+    let tx = psbt.clone().extract_tx()?;
+
     let psbt_input = &psbt.inputs[input_index];
-    let prev_value = psbt_input
+
+    let script_pubkey = &psbt_input
         .witness_utxo
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Missing witness UTXO for input {}", input_index))?
-        .value;
+        .script_pubkey
+        .clone();
+    let tx_ty = TransactionType::from(script_pubkey.as_script());
 
-    // Clone psbt to extract transaction, since extract_tx consumes it
-    let tx = psbt.clone().extract_tx_unchecked_fee_rate();
+    let prev_value = psbt_input.witness_utxo.as_ref().unwrap().value;
 
-    // Compute sighash for P2WSH (SegWit v0)
     let mut sighash_cache = SighashCache::new(&tx);
-    let sighash = sighash_cache
-        .p2wsh_signature_hash(
-            input_index,
-            &redeem_script,
-            prev_value,
-            EcdsaSighashType::All,
-        )
-        .context("Failed to compute sighash")?;
 
-    let msg = Message::from_digest(sighash.to_byte_array());
-    let signature = secp.sign_ecdsa(&msg, &secret_key);
-
-    // Convert to bitcoin's Signature type for PSBT
-    let bitcoin_sig = hal_simplicity::simplicity::bitcoin::ecdsa::Signature {
-        signature,
-        sighash_type: EcdsaSighashType::All,
+    let sighash = match tx_ty {
+        TransactionType::P2SH => *sighash_cache
+            .legacy_signature_hash(input_index, &redeem_script, EcdsaSighashType::All.to_u32())?
+            .as_byte_array(),
+        TransactionType::P2WSH => *sighash_cache
+            .p2wsh_signature_hash(
+                input_index,
+                &redeem_script,
+                prev_value,
+                EcdsaSighashType::All,
+            )?
+            .as_byte_array(),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported script type for tx sign: {}",
+                hex::encode(script_pubkey.as_bytes())
+            ));
+        }
     };
+
+    let msg = Message::from_digest(sighash);
+
+    let signature =
+        hal_simplicity::bitcoin::ecdsa::Signature::sighash_all(secp.sign_ecdsa(&msg, &secret_key));
+    let sig_bytes = signature.to_vec();
 
     // Add signature to PSBT
     let input = &mut psbt.inputs[input_index];
-    input.partial_sigs.insert(public_key, bitcoin_sig);
+    input.partial_sigs.insert(public_key, signature);
 
-    if input.witness_script.is_none() {
-        input.witness_script = Some(redeem_script);
+    if script_pubkey.is_p2sh() {
+        if input.redeem_script.is_none() {
+            input.redeem_script = Some(redeem_script.clone());
+        }
+    } else if script_pubkey.is_p2wsh() && input.witness_script.is_none() {
+        input.witness_script = Some(redeem_script.clone());
     }
 
     let partial_sigs_count = psbt.inputs[input_index].partial_sigs.len();
 
-    let mut sig_bytes = signature.serialize_der().to_vec();
-    sig_bytes.push(EcdsaSighashType::All.to_u32() as u8);
-
     let output = json!({
         "psbt": hex::encode(psbt.serialize()),
-        "signature_hex": hex::encode(&sig_bytes),
+        "signature_hex": hex::encode(sig_bytes),
         "public_key_hex": hex::encode(public_key.to_bytes()),
         "input_index": input_index,
         "partial_sigs_count": partial_sigs_count,

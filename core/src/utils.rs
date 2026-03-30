@@ -74,7 +74,7 @@ impl std::fmt::Display for TransactionType {
     }
 }
 
-impl From<&Script> for TransactionType {
+impl From<&hal_simplicity::simplicity::elements::Script> for TransactionType {
     fn from(value: &Script) -> Self {
         if value.is_p2sh() {
             return TransactionType::P2SH;
@@ -85,6 +85,24 @@ impl From<&Script> for TransactionType {
         }
 
         if value.is_v1_p2tr() {
+            return TransactionType::P2TR;
+        }
+
+        unimplemented!("Unsupported transaction type")
+    }
+}
+
+impl From<&hal_simplicity::bitcoin::Script> for TransactionType {
+    fn from(value: &hal_simplicity::bitcoin::Script) -> Self {
+        if value.is_p2sh() {
+            return TransactionType::P2SH;
+        }
+
+        if value.is_p2wsh() {
+            return TransactionType::P2WSH;
+        }
+
+        if value.is_p2tr() {
             return TransactionType::P2TR;
         }
 
