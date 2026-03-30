@@ -25,6 +25,8 @@ Options:
 
 You can run the [demo script](scripts/demo.sh) to see example usages of the CLI commands and an example of Simplicity Unchained capabilities.
 
+Service supports P2SH, P2WSH and P2TR transaction types.
+
 Firstly, ensure you have the Simplicity Unchained service running.
 
 ```bash
@@ -36,7 +38,7 @@ Then, in a separate terminal, navigate to the `cli` directory and execute the de
 
 ```bash
 cd cli
-./scripts/demo.sh
+./scripts/demo.sh p2sh/p2wsh/p2tr
 ```
 
 > ⚠️ **Warning: Too many requests**

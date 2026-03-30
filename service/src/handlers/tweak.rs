@@ -1,20 +1,16 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use hal_simplicity::{
-    bitcoin::secp256k1,
+    bitcoin::{self, secp256k1},
     hal_simplicity::Program,
-    simplicity::elements::{
-        self,
-        schnorr::{TapTweak, UntweakedKeypair},
-        taproot::TapNodeHash,
-    },
+    simplicity::elements::{self, schnorr::TapTweak},
 };
 
 use elements::{bitcoin::PublicKey, hashes::Hash};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use simplicity_unchained_core::jets::{bitcoin::CoreExtension, elements::ElementsExtension};
+use simplicity_unchained_core::jets::elements::ElementsExtension;
 
 use crate::handlers::{ErrorResponse, SignerState};
 
@@ -76,31 +72,72 @@ fn get_tweaked_key_internal(
     state: &SignerState,
     request: TweakRequest,
 ) -> Result<TweakResponse, String> {
+    match &request.jet_env {
+        Some(JetEnvKind::Bitcoin) => get_tweaked_key_bitcoin(state, request),
+        _ => get_tweaked_key_elements(state, request),
+    }
+}
+
+fn get_tweaked_key_bitcoin(
+    state: &SignerState,
+    request: TweakRequest,
+) -> Result<TweakResponse, String> {
     // Parse Simplicity program and get CMR from commitment
-    let cmr = match &request.jet_env {
-        Some(JetEnvKind::Bitcoin) => {
-            let program = Program::<CoreExtension>::from_str(&request.program, None)
-                .map_err(|e| format!("Failed to parse program: {}", e))?;
+    let cmr = {
+        let program = Program::<ElementsExtension>::from_str(&request.program, None)
+            .map_err(|e| format!("Failed to parse program: {}", e))?;
 
-            program.commit_prog().cmr()
-        }
-        _ => {
-            let program = Program::<ElementsExtension>::from_str(&request.program, None)
-                .map_err(|e| format!("Failed to parse program: {}", e))?;
-
-            program.commit_prog().cmr()
-        }
+        program.commit_prog().cmr()
     };
 
     // Create untweaked keypair and tweak it with the CMR
-    let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
-    let tweaked_keypair = untweaked_keypair.tap_tweak(
+    let untweaked_keypair =
+        bitcoin::key::UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
+
+    let tweaked_keypair = bitcoin::key::TapTweak::tap_tweak(
+        untweaked_keypair,
         &*state.secp,
-        Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
+        Some(bitcoin::taproot::TapNodeHash::from_byte_array(
+            cmr.to_byte_array(),
+        )),
     );
 
     let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+    let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+        tweaked_public_key.to_x_only_public_key(),
+        tweaked_parity,
+    ));
 
+    Ok(TweakResponse {
+        cmr_hex: hex::encode(cmr.to_byte_array()),
+        tweaked_public_key_hex: hex::encode(public_key.to_bytes()),
+    })
+}
+
+fn get_tweaked_key_elements(
+    state: &SignerState,
+    request: TweakRequest,
+) -> Result<TweakResponse, String> {
+    // Parse Simplicity program and get CMR from commitment
+    let cmr = {
+        let program = Program::<ElementsExtension>::from_str(&request.program, None)
+            .map_err(|e| format!("Failed to parse program: {}", e))?;
+
+        program.commit_prog().cmr()
+    };
+
+    // Create untweaked keypair and tweak it with the CMR
+    let untweaked_keypair =
+        elements::schnorr::UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
+
+    let tweaked_keypair = untweaked_keypair.tap_tweak(
+        &*state.secp,
+        Some(elements::taproot::TapNodeHash::from_byte_array(
+            cmr.to_byte_array(),
+        )),
+    );
+
+    let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
     let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
         tweaked_public_key.into_inner(),
         tweaked_parity,

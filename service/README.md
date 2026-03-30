@@ -69,7 +69,7 @@ The service exposes the following endpoints:
 
 - `psbt_hex`: The PSBT (Partially Signed Bitcoin Transaction) encoded as a hexadecimal string
 - `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation
+- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional, can be an empty string)
 - `program`: The Simplicity program to execute for validation before signing
 - `witness`: The witness data required by the Simplicity program (optional, can be an empty string)
 
@@ -112,7 +112,7 @@ The service exposes the following endpoints:
 
 - `pset_hex`: The PSET (Partially Signed Elements Transaction) encoded as a hexadecimal string
 - `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation
+- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (can be an empty string)
 - `program`: The Simplicity program to execute for validation before signing
 - `witness`: The witness data required by the Simplicity program (can be an empty string)
 
@@ -139,6 +139,10 @@ The service exposes the following endpoints:
 ### 4. Tweak Endpoint
 
 `POST /simplicity-unchained/tweak`: Accepts a Simplicity program, computes its CMR (commitment Merkle root), and returns the tweaked public key using taproot key tweaking.
+
+### **Note** 
+
+In P2TR case, key, tweaked with Simplicity CMR, used as inner key.
 
 **Request Body**:
 

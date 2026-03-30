@@ -1,17 +1,11 @@
-use std::sync::Arc;
-
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use hal_simplicity::{
     bitcoin::secp256k1,
-    hal_simplicity::Program,
-    simplicity::{
-        elements::{
-            self, Transaction,
-            schnorr::{TapTweak, UntweakedKeypair},
-            taproot::TapNodeHash,
-        },
-        jet::elements::ElementsEnv,
+    simplicity::elements::{
+        self, SchnorrSighashType, Transaction, TxOut,
+        schnorr::{TapTweak, TweakedKeypair, UntweakedKeypair},
+        taproot::TapNodeHash,
     },
 };
 
@@ -29,10 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use validator::Validate;
 
-use simplicity_unchained_core::{
-    jets::custom_jet::CustomJet,
-    runner::{RunnerError, SimplicityRunner, elements_execution_environment},
-};
+use simplicity_unchained_core::{runner::SimplicityRunner, utils::TransactionType};
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
@@ -51,7 +42,7 @@ pub struct SignPsetRequest {
     pub input_index: usize,
 
     #[validate(custom(function = "validation::validate_redeem_script"))]
-    pub redeem_script_hex: String,
+    pub redeem_script_hex: Option<String>,
 
     #[validate(length(min = 1))]
     pub program: String,
@@ -101,7 +92,6 @@ pub async fn sign_pset(
         }
     }
 }
-
 fn sign_pset_internal(
     state: &SignerState,
     request: SignPsetRequest,
@@ -120,48 +110,24 @@ fn sign_pset_internal(
         ));
     }
 
-    let redeem_script_bytes = hex::decode(&request.redeem_script_hex)
-        .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
-
-    let redeem_script = Script::from(redeem_script_bytes);
-
-    // Validate with Simplicity runner before signing
-    let cmr = if !state.has_custom_jets {
-        SimplicityRunner::execute_elements(
-            &request.program,
-            request.witness.as_deref(),
-            request.input_index,
-            &pset,
-            redeem_script.clone(),
-            state.elements_network,
-        )
-        .map_err(|e| format!("Simplicity execution failed: {}", e))?
-    } else {
-        let program = Program::<CustomJet<ElementsEnv<Arc<Transaction>>>>::from_str(
-            &request.program,
-            request.witness.as_deref(),
-        )
-        .map_err(RunnerError::ProgramParse)
-        .map_err(|e| format!("Simplicity execution failed: {}", e))?;
-
-        let elements_env = elements_execution_environment(
-            &pset,
-            request.input_index,
-            program.cmr(),
-            state.elements_network.clone().genesis_hash(),
-        )
-        .map_err(|e| format!("Simplicity execution failed: {}", e))?;
-
-        SimplicityRunner::execute_custom(
-            program,
-            request.input_index,
-            &pset,
-            redeem_script.clone(),
-            elements_env,
-            state.elements_network,
-        )
-        .map_err(|e| format!("Simplicity execution failed: {}", e))?
+    let redeem_script = match request.redeem_script_hex {
+        Some(str) => {
+            let bytes = hex::decode(str)
+                .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
+            Script::from(bytes)
+        }
+        None => Script::new(),
     };
+
+    let cmr = SimplicityRunner::execute_elements(
+        &request.program,
+        request.witness.as_deref(),
+        request.input_index,
+        &pset,
+        redeem_script.clone(),
+        state.elements_network,
+    )
+    .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
     let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
     let tweaked_keypair = untweaked_keypair.tap_tweak(
@@ -169,34 +135,99 @@ fn sign_pset_internal(
         Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
     );
 
-    let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
-
-    let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
-        tweaked_public_key.into_inner(),
-        tweaked_parity,
-    ));
-
     let tx = pset
         .extract_tx()
         .map_err(|e| format!("Failed to extract transaction: {}", e))?;
 
-    let pset_input = &pset.inputs()[request.input_index];
-    let prev_value = pset_input
+    let script_pubkey = &pset.inputs()[request.input_index]
         .witness_utxo
         .as_ref()
-        .ok_or_else(|| format!("Missing witness UTXO for input {}", request.input_index))?
-        .value;
+        .ok_or_else(|| format!("Missing witness_utxo for input {}", request.input_index))?
+        .script_pubkey;
 
-    // Compute sighash for P2WSH (SegWit v0)
-    let mut sighash_cache = SighashCache::new(&tx);
-    let sighash = sighash_cache.segwitv0_sighash(
-        request.input_index,
-        &redeem_script,
-        prev_value,
-        EcdsaSighashType::All,
-    );
+    let tx_ty = TransactionType::from(script_pubkey);
+    let (sig_bytes, partial_sigs_count) = match tx_ty {
+        TransactionType::P2SH | TransactionType::P2WSH => {
+            let sig = sign_p2wsh_p2sh(
+                state,
+                &mut pset,
+                &tx,
+                &redeem_script,
+                &tweaked_keypair,
+                request.input_index,
+                tx_ty,
+            )?;
 
-    // Sign the sighash
+            let count = pset.inputs()[request.input_index].partial_sigs.len();
+            (sig, count)
+        }
+        TransactionType::P2TR => {
+            let sig = sign_p2tr(state, &mut pset, &tx, &tweaked_keypair, request.input_index)?;
+            let count = pset.inputs()[request.input_index].partial_sigs.len();
+            (sig, count)
+        }
+    };
+
+    let public_key_hex = match tx_ty {
+        TransactionType::P2SH | TransactionType::P2WSH => {
+            let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+            let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+                tweaked_public_key.into_inner(),
+                tweaked_parity,
+            ));
+            hex::encode(public_key.to_bytes())
+        }
+        TransactionType::P2TR => String::new(),
+    };
+
+    Ok(SignPsetResponse {
+        pset_hex: hex::encode(serialize(&pset)),
+        // NOTE: For P2TR, sig_bytes is 64 bytes
+        // For P2SH/P2WSH it is DER-encoded ECDSA + 1 sighash byte.
+        signature_hex: hex::encode(&sig_bytes),
+        public_key_hex,
+        input_index: request.input_index,
+        partial_sigs_count,
+    })
+}
+
+fn sign_p2wsh_p2sh(
+    state: &SignerState,
+    pset: &mut PartiallySignedTransaction,
+    tx: &Transaction,
+    redeem_script: &Script,
+    tweaked_keypair: &TweakedKeypair,
+    input_index: usize,
+    tx_type: TransactionType,
+) -> Result<Vec<u8>, String> {
+    let (tweaked_public_key, tweaked_parity) = tweaked_keypair.public_parts();
+    let public_key = PublicKey::new(secp256k1::PublicKey::from_x_only_public_key(
+        tweaked_public_key.into_inner(),
+        tweaked_parity,
+    ));
+    let sighash = match tx_type {
+        TransactionType::P2SH => {
+            let sighash_cache = SighashCache::new(tx);
+            sighash_cache.legacy_sighash(input_index, redeem_script, EcdsaSighashType::All)
+        }
+        TransactionType::P2WSH => {
+            let prev_value = pset.inputs()[input_index]
+                .witness_utxo
+                .as_ref()
+                .ok_or_else(|| format!("Missing witness UTXO for input {}", input_index))?
+                .value;
+
+            let mut sighash_cache = SighashCache::new(tx);
+            sighash_cache.segwitv0_sighash(
+                input_index,
+                redeem_script,
+                prev_value,
+                EcdsaSighashType::All,
+            )
+        }
+        _ => unreachable!("Other types handled separately"),
+    };
+
     let msg = Message::from_digest(sighash.to_byte_array());
     let signature = state
         .secp
@@ -205,22 +236,61 @@ fn sign_pset_internal(
     let mut sig_bytes = signature.serialize_der().to_vec();
     sig_bytes.push(EcdsaSighashType::All.as_u32() as u8);
 
-    let input = &mut pset.inputs_mut()[request.input_index];
+    let input = &mut pset.inputs_mut()[input_index];
     input.partial_sigs.insert(public_key, sig_bytes.clone());
 
-    if input.witness_script.is_none() {
-        input.witness_script = Some(redeem_script.clone());
+    let input_script = match tx_type {
+        TransactionType::P2SH => &mut input.redeem_script,
+        TransactionType::P2WSH => &mut input.witness_script,
+        _ => unreachable!("Other types handled separately"),
+    };
+
+    if input_script.is_none() {
+        *input_script = Some(redeem_script.clone());
     }
 
-    let partial_sigs_count = pset.inputs()[request.input_index].partial_sigs.len();
+    Ok(sig_bytes)
+}
 
-    Ok(SignPsetResponse {
-        pset_hex: hex::encode(serialize(&pset)),
-        signature_hex: hex::encode(&sig_bytes),
-        public_key_hex: hex::encode(public_key.to_bytes()),
-        input_index: request.input_index,
-        partial_sigs_count,
-    })
+fn sign_p2tr(
+    state: &SignerState,
+    pset: &mut PartiallySignedTransaction,
+    tx: &Transaction,
+    tweaked_keypair: &TweakedKeypair,
+    input_index: usize,
+) -> Result<Vec<u8>, String> {
+    let prevouts: Vec<TxOut> = pset
+        .inputs()
+        .iter()
+        .map(|i| {
+            i.witness_utxo
+                .clone()
+                .ok_or_else(|| "Missing witness_utxo for taproot input".to_string())
+        })
+        .collect::<Result<_, _>>()?;
+
+    let mut sighash_cache = SighashCache::new(tx);
+    let sighash = sighash_cache
+        .taproot_key_spend_signature_hash(
+            input_index,
+            &elements::sighash::Prevouts::All(&prevouts),
+            SchnorrSighashType::Default,
+            state.elements_network.genesis_hash(),
+        )
+        .map_err(|e| format!("Failed to compute taproot sighash: {}", e))?;
+
+    let msg = Message::from_digest(sighash.to_byte_array());
+    let signature = state.secp.sign_schnorr(&msg, &tweaked_keypair.to_inner());
+
+    // 64-byte raw Schnorr signature
+    let sig_bytes = signature.as_ref().to_vec();
+
+    pset.inputs_mut()[input_index].tap_key_sig = Some(elements::SchnorrSig {
+        sig: signature,
+        hash_ty: SchnorrSighashType::Default,
+    });
+
+    Ok(sig_bytes)
 }
 
 #[cfg(test)]
@@ -236,7 +306,7 @@ mod tests {
         script::Builder as ScriptBuilder,
         secp256k1_zkp::Secp256k1,
     };
-    use hal_simplicity::hal_simplicity::Program;
+    use hal_simplicity::{bitcoin::hashes::Hash, hal_simplicity::Program};
     use std::str::FromStr;
 
     use hal_simplicity::simplicity::elements::secp256k1_zkp::SecretKey;
@@ -312,7 +382,7 @@ mod tests {
         }
     }
 
-    fn create_test_pset(tx: Transaction) -> PartiallySignedTransaction {
+    fn create_test_pset(tx: Transaction, script_pubkey: Script) -> PartiallySignedTransaction {
         let mut pset = PartiallySignedTransaction::from_tx(tx);
 
         // Add witness_utxo to the first input (required for SegWit v0)
@@ -320,7 +390,7 @@ mod tests {
             asset: Asset::Explicit(elements::AssetId::from_slice(&[0; 32]).unwrap()),
             value: Value::Explicit(100_000),
             nonce: elements::confidential::Nonce::Null,
-            script_pubkey: Script::new(),
+            script_pubkey,
             witness: Default::default(),
         });
 
@@ -334,7 +404,8 @@ mod tests {
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx);
+        let script_pubkey = Script::new_v0_wsh(&redeem_script.to_v0_p2wsh().wscript_hash());
+        let pset = create_test_pset(tx, script_pubkey);
 
         let pset_bytes = serialize(&pset);
         let pset_hex = hex::encode(&pset_bytes);
@@ -342,7 +413,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: Some("".to_string()),
         };
@@ -377,13 +448,96 @@ mod tests {
     }
 
     #[test]
+    fn test_sign_p2sh_success() {
+        let state = create_test_signer_state();
+        let key2 = SecretKey::from_slice(&[0xab; 32]).expect("valid secret key");
+        let redeem_script = create_2of2_multisig_script(&state, &key2);
+
+        let tx = create_test_transaction();
+        let script_pubkey = Script::new_p2sh(&redeem_script.script_hash());
+        let pset = create_test_pset(tx, script_pubkey);
+        let pset_hex = hex::encode(serialize(&pset));
+
+        let request = SignPsetRequest {
+            pset_hex,
+            input_index: 0,
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
+            program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
+            witness: Some("".to_string()),
+        };
+
+        let result = sign_pset_internal(&state, request).unwrap();
+
+        // DER + sighash byte
+        let sig_bytes = hex::decode(&result.signature_hex).unwrap();
+        assert_eq!(
+            *sig_bytes.last().unwrap(),
+            EcdsaSighashType::All.as_u32() as u8
+        );
+        assert!(!result.public_key_hex.is_empty());
+
+        let signed_pset_bytes = hex::decode(&result.pset_hex).unwrap();
+        let signed_pset: PartiallySignedTransaction = deserialize(&signed_pset_bytes).unwrap();
+
+        // P2SH: redeem_script set, witness_script NOT set
+        assert!(signed_pset.inputs()[0].redeem_script.is_some());
+        assert!(signed_pset.inputs()[0].witness_script.is_none());
+        assert!(!signed_pset.inputs()[0].partial_sigs.is_empty());
+    }
+
+    #[test]
+    fn test_sign_p2tr_success() {
+        let state = create_test_signer_state();
+        let key2 = SecretKey::from_slice(&[0xab; 32]).expect("valid secret key");
+        let redeem_script = create_2of2_multisig_script(&state, &key2);
+
+        let tx = create_test_transaction();
+
+        let secret_key = SecretKey::from_slice(&[0xcd; 32]).unwrap();
+        let secp = Secp256k1::new();
+        let keypair = UntweakedKeypair::from_secret_key(&secp, &secret_key);
+        let (xonly, _) = keypair.x_only_public_key();
+        let script_pubkey = Script::new_v1_p2tr(&secp, xonly, None);
+
+        let pset = create_test_pset(tx, script_pubkey);
+        let pset_hex = hex::encode(serialize(&pset));
+
+        let request = SignPsetRequest {
+            pset_hex,
+            input_index: 0,
+            // redeem_script is only used for Simplicity validation, not the spending script
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
+            program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
+            witness: Some("".to_string()),
+        };
+
+        let result = sign_pset_internal(&state, request).unwrap();
+
+        // P2TR returns 64-byte Schnorr sig, no sighash byte
+        let sig_bytes = hex::decode(&result.signature_hex).unwrap();
+        assert_eq!(sig_bytes.len(), 64);
+
+        assert!(result.public_key_hex.is_empty());
+
+        let signed_pset_bytes = hex::decode(&result.pset_hex).unwrap();
+        let signed_pset: PartiallySignedTransaction = deserialize(&signed_pset_bytes).unwrap();
+
+        // tap_key_sig set, partial_sigs empty
+        let tap_sig = signed_pset.inputs()[0]
+            .tap_key_sig
+            .expect("tap_key_sig should be present");
+        assert_eq!(tap_sig.hash_ty, SchnorrSighashType::Default);
+        assert!(signed_pset.inputs()[0].partial_sigs.is_empty());
+    }
+
+    #[test]
     fn test_sign_pset_internal_invalid_hex() {
         let state = create_test_signer_state();
 
         let request = SignPsetRequest {
             pset_hex: "invalid_hex!!!".to_string(),
             input_index: 0,
-            redeem_script_hex: "".to_string(),
+            redeem_script_hex: Some("".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -403,7 +557,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex: invalid_data,
             input_index: 0,
-            redeem_script_hex: "".to_string(),
+            redeem_script_hex: Some("".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -420,7 +574,9 @@ mod tests {
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx);
+
+        let script_pubkey = Script::new_v0_wsh(&redeem_script.to_v0_p2wsh().wscript_hash());
+        let pset = create_test_pset(tx, script_pubkey);
 
         let pset_bytes = serialize(&pset);
         let pset_hex = hex::encode(&pset_bytes);
@@ -428,7 +584,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 999, // Out of bounds
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -447,7 +603,9 @@ mod tests {
         let state = create_test_signer_state();
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx);
+
+        let script_pubkey = Script::new_v0_wsh(&Script::default().to_v0_p2wsh().wscript_hash());
+        let pset = create_test_pset(tx, script_pubkey);
 
         let pset_bytes = serialize(&pset);
         let pset_hex = hex::encode(&pset_bytes);
@@ -455,7 +613,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: "invalid_hex!!!".to_string(),
+            redeem_script_hex: Some("invalid_hex!!!".to_string()),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -476,7 +634,8 @@ mod tests {
         let redeem_script = create_2of2_multisig_script(&state, &key2);
 
         let tx = create_test_transaction();
-        let pset = create_test_pset(tx.clone());
+        let script_pubkey = Script::new_v0_wsh(&redeem_script.to_v0_p2wsh().wscript_hash());
+        let pset = create_test_pset(tx.clone(), script_pubkey);
 
         let pset_bytes = serialize(&pset);
         let pset_hex = hex::encode(&pset_bytes);
@@ -486,7 +645,7 @@ mod tests {
         let request = SignPsetRequest {
             pset_hex,
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: program.clone(),
             witness: Some("".to_string()),
         };
@@ -549,6 +708,71 @@ mod tests {
 
         assert!(verification.is_ok());
     }
+    #[test]
+    fn test_sign_p2tr_signature_verification() {
+        let state = create_test_signer_state();
+        let key2 = SecretKey::from_slice(&[0xab; 32]).expect("valid secret key");
+        let redeem_script = create_2of2_multisig_script(&state, &key2);
+
+        let tx = create_test_transaction();
+
+        let secret_key = SecretKey::from_slice(&[0xcd; 32]).unwrap();
+        let secp = Secp256k1::new();
+        let keypair = UntweakedKeypair::from_secret_key(&secp, &secret_key);
+        let (xonly, _) = keypair.x_only_public_key();
+        let script_pubkey = Script::new_v1_p2tr(&secp, xonly, None);
+
+        let pset = create_test_pset(tx.clone(), script_pubkey);
+        let pset_hex = hex::encode(serialize(&pset));
+
+        let program = "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string();
+
+        let request = SignPsetRequest {
+            pset_hex,
+            input_index: 0,
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
+            program: program.clone(),
+            witness: Some("".to_string()),
+        };
+
+        let result = sign_pset_internal(&state, request).unwrap();
+
+        let signed_pset_bytes = hex::decode(&result.pset_hex).unwrap();
+        let signed_pset: PartiallySignedTransaction = deserialize(&signed_pset_bytes).unwrap();
+
+        let tap_sig = signed_pset.inputs()[0].tap_key_sig.unwrap();
+
+        // Reconstruct tweaked keypair the same way sign_pset_internal does
+        let program = Program::<ElementsExtension>::from_str(&program, Some("")).unwrap();
+        let cmr = program.commit_prog().cmr();
+
+        let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
+        let tweaked_keypair = untweaked_keypair.tap_tweak(
+            &*state.secp,
+            Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
+        );
+
+        // Recompute sighash
+        let prevouts = vec![signed_pset.inputs()[0].witness_utxo.clone().unwrap()];
+        let mut sighash_cache = SighashCache::new(&tx);
+        let sighash = sighash_cache
+            .taproot_key_spend_signature_hash(
+                0,
+                &elements::sighash::Prevouts::All(&prevouts),
+                SchnorrSighashType::Default,
+                state.elements_network.genesis_hash(),
+            )
+            .unwrap();
+
+        let msg = Message::from_digest(sighash.to_byte_array());
+
+        // Verify with x-only pubkey — parity is stripped for P2TR
+        let (tweaked_xonly, _parity) = tweaked_keypair.public_parts();
+        state
+            .secp
+            .verify_schnorr(&tap_sig.sig, &msg, &tweaked_xonly.into_inner())
+            .expect("schnorr signature should be valid");
+    }
 
     #[test]
     fn test_signer_state_new_valid_key() {
@@ -595,7 +819,7 @@ mod tests {
         let valid_request = SignPsetRequest {
             pset_hex: "0000000000".to_string(),
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
@@ -605,10 +829,31 @@ mod tests {
         let invalid_request = SignPsetRequest {
             pset_hex: "".to_string(),
             input_index: 0,
-            redeem_script_hex: hex::encode(redeem_script.as_bytes()),
+            redeem_script_hex: Some(hex::encode(redeem_script.as_bytes())),
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             witness: None,
         };
         assert!(invalid_request.validate().is_err());
+    }
+
+    #[test]
+    fn test_sign_pset_invalid_spend_type() {
+        let state = create_test_signer_state();
+        let tx = create_test_transaction();
+        let script_pubkey =
+            Script::new_p2pkh(&hal_simplicity::simplicity::elements::PubkeyHash::all_zeros());
+        let pset = create_test_pset(tx, script_pubkey);
+        let pset_hex = hex::encode(serialize(&pset));
+
+        let request = SignPsetRequest {
+            pset_hex,
+            input_index: 0,
+            redeem_script_hex: Some("abcd".to_string()),
+            program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
+            witness: None,
+        };
+
+        let result = sign_pset_internal(&state, request);
+        assert!(result.is_err());
     }
 }

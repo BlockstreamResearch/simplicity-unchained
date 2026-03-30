@@ -1,4 +1,5 @@
 use hal_simplicity::simplicity::bitcoin;
+use hal_simplicity::simplicity::elements::Script;
 use hal_simplicity::simplicity::elements::{
     self,
     bitcoin::PublicKey,
@@ -56,11 +57,65 @@ pub fn generate_keypair() -> (SecretKey, PublicKey) {
     (secret_key, public_key)
 }
 
+#[derive(Clone, Copy)]
+pub enum TransactionType {
+    P2SH,
+    P2WSH,
+    P2TR,
+}
+
+impl std::fmt::Display for TransactionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::P2SH => write!(f, "p2sh"),
+            Self::P2WSH => write!(f, "p2wsh"),
+            Self::P2TR => write!(f, "p2tr"),
+        }
+    }
+}
+
+impl From<&hal_simplicity::simplicity::elements::Script> for TransactionType {
+    fn from(value: &Script) -> Self {
+        if value.is_p2sh() {
+            return TransactionType::P2SH;
+        }
+
+        if value.is_v0_p2wsh() {
+            return TransactionType::P2WSH;
+        }
+
+        if value.is_v1_p2tr() {
+            return TransactionType::P2TR;
+        }
+
+        unimplemented!("Unsupported transaction type")
+    }
+}
+
+impl From<&hal_simplicity::bitcoin::Script> for TransactionType {
+    fn from(value: &hal_simplicity::bitcoin::Script) -> Self {
+        if value.is_p2sh() {
+            return TransactionType::P2SH;
+        }
+
+        if value.is_p2wsh() {
+            return TransactionType::P2WSH;
+        }
+
+        if value.is_p2tr() {
+            return TransactionType::P2TR;
+        }
+
+        unimplemented!("Unsupported transaction type")
+    }
+}
+
 /// Generate a 2-of-2 multisig address from a list of public keys
 /// Returns the address and the redeem script
 pub fn generate_2of2_multisig_address_elements(
     pubkeys: &[PublicKey],
     address_params: &'static elements::AddressParams,
+    tx_ty: TransactionType,
 ) -> Result<(elements::Address, elements::script::Script), UtilsError> {
     if pubkeys.len() != 2 {
         return Err(UtilsError::InvalidPublicKeyCount(pubkeys.len()));
@@ -75,14 +130,14 @@ pub fn generate_2of2_multisig_address_elements(
         .push_opcode(elements::opcodes::all::OP_CHECKMULTISIG)
         .into_script();
 
-    // Create the P2WSH address from the redeem script
-    let address = elements::Address::p2wsh(&redeem_script, None, address_params);
-
-    // hal_simplicity::simplicity::bitcoin::Address::p2wsh(script, hrp)
+    let address = match tx_ty {
+        TransactionType::P2SH => elements::Address::p2sh(&redeem_script, None, address_params),
+        TransactionType::P2WSH => elements::Address::p2wsh(&redeem_script, None, address_params),
+        _ => unreachable!("P2TR case handled separately"),
+    };
 
     Ok((address, redeem_script))
 }
-
 /// Generate a 2-of-2 multisig address from a list of public keys
 /// Returns the address and the redeem script
 pub fn generate_2of2_multisig_address_bitcoin(
@@ -102,6 +157,7 @@ pub fn generate_2of2_multisig_address_bitcoin(
         .push_opcode(bitcoin::opcodes::all::OP_CHECKMULTISIG)
         .into_script();
 
+    // Create the P2WSH address from the redeem script
     let address = bitcoin::address::Address::p2wsh(&redeem_script, network);
 
     Ok((address, redeem_script))
@@ -132,8 +188,11 @@ mod tests {
         let (_sk2, pk2) = generate_keypair();
 
         let pubkeys = vec![pk1, pk2];
-        let result =
-            generate_2of2_multisig_address_elements(&pubkeys, &elements::AddressParams::ELEMENTS);
+        let result = generate_2of2_multisig_address_elements(
+            &pubkeys,
+            &elements::AddressParams::ELEMENTS,
+            TransactionType::P2WSH,
+        );
 
         assert!(result.is_ok());
         let (address, redeem_script) = result.unwrap();
@@ -150,8 +209,11 @@ mod tests {
         let (_sk1, pk1) = generate_keypair();
 
         let pubkeys = vec![pk1];
-        let result =
-            generate_2of2_multisig_address_elements(&pubkeys, &elements::AddressParams::ELEMENTS);
+        let result = generate_2of2_multisig_address_elements(
+            &pubkeys,
+            &elements::AddressParams::ELEMENTS,
+            TransactionType::P2WSH,
+        );
 
         assert!(result.is_err());
         assert!(matches!(
