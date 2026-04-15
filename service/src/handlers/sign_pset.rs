@@ -122,7 +122,7 @@ fn sign_pset_internal(
         request.input_index,
         &pset,
         redeem_script.clone(),
-        state.elements_network.clone(),
+        state.elements_network,
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
@@ -321,7 +321,7 @@ mod tests {
 
         // Verify the signature has the correct format (DER + sighash type)
         let sig_bytes = hex::decode(&response.signature_hex).unwrap();
-        assert!(sig_bytes.len() > 0);
+        assert!(!sig_bytes.is_empty());
         assert_eq!(
             *sig_bytes.last().unwrap(),
             EcdsaSighashType::All.as_u32() as u8

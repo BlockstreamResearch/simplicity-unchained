@@ -116,7 +116,7 @@ fn sign_psbt_internal(
         request.input_index,
         &psbt,
         hal_simplicity::simplicity::elements::Script::from(redeem_script_bytes),
-        state.bitcoin_network.clone(),
+        state.bitcoin_network,
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
 
@@ -311,7 +311,7 @@ mod tests {
 
         // Verify the signature has the correct format (DER + sighash type)
         let sig_bytes = hex::decode(&response.signature_hex).unwrap();
-        assert!(sig_bytes.len() > 0);
+        assert!(!sig_bytes.is_empty());
         assert_eq!(
             *sig_bytes.last().unwrap(),
             EcdsaSighashType::All.to_u32() as u8

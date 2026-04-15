@@ -64,12 +64,8 @@ impl SimplicityRunner {
         let program = Program::<ElementsExtension>::from_str(program, witness)
             .map_err(RunnerError::ProgramParse)?;
 
-        let elements_env = elements_execution_environment(
-            &pset,
-            input_idx,
-            program.cmr(),
-            network.genesis_hash(),
-        )?;
+        let elements_env =
+            elements_execution_environment(pset, input_idx, program.cmr(), network.genesis_hash())?;
 
         let env = UnchainedEnv::new(redeem_script, elements_env);
 
