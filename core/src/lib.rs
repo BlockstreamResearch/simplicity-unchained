@@ -4,6 +4,7 @@ use hal_simplicity::simplicity::elements::BlockHash;
 use hal_simplicity::simplicity::elements::hashes::Hash;
 
 pub mod jets;
+pub mod precop;
 pub mod runner;
 pub mod utils;
 
