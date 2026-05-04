@@ -22,7 +22,7 @@ Each component of the project has its own README file with more detailed informa
 
 ## Web Demo
 
-A live testnet demo is hosted at **[testnet.simplicity-unchained.blockstream.com](https://testnet.simplicity-unchained.blockstream.com/)**. It provides a browser interface for writing Simplicity programs, compiling them, generating a P2WSH address, and sending co-signed transactions on Bitcoin Testnet4 or Liquid Testnet — no CLI or local setup required.
+A live testnet demo is hosted at **[testnet.simplicity-unchained.blockstream.com](https://testnet.simplicity-unchained.blockstream.com/)**. It provides a browser interface for writing Simplicity programs, compiling them, generating a P2TR address, and sending co-signed transactions on Bitcoin Testnet4 or Liquid Testnet — no CLI or local setup required.
 
 ![Simplicity Unchained Web Demo](doc/demo_website.png)
 
@@ -33,7 +33,7 @@ A live testnet demo is hosted at **[testnet.simplicity-unchained.blockstream.com
 You can explore the Bitcoin capabilities by running the [Bitcoin demo script](cli/scripts/demo_bitcoin.sh). This demo guides you through:
 
 1. Tweaking a public key with a Simplicity program via the Simplicity Unchained service.
-2. Creating a 2-of-2 multisig P2SH, P2WSH or P2TR address on Bitcoin regtest.
+2. Creating a 2-of-2 multisig P2TR address on Bitcoin regtest.
 3. Funding the address and creating a PSBT spending transaction.
 4. Using the Simplicity Unchained service to co-sign the PSBT after successful Simplicity program execution.
 5. Broadcasting the fully signed transaction to Bitcoin regtest.

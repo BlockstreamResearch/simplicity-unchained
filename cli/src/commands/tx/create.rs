@@ -118,6 +118,7 @@ pub fn execute(
     outputs: &[String],
     asset_id: Option<&str>,
     network: &str,
+    sequence: Option<u16>,
 ) -> Result<()> {
     let params = get_network_params(network)?;
 
@@ -148,7 +149,9 @@ pub fn execute(
             previous_output: OutPoint::new(txid, vout),
             is_pegin: false,
             script_sig: elements::script::Script::new(),
-            sequence: elements::Sequence::MAX,
+            sequence: sequence
+                .map(elements::Sequence::from_height)
+                .unwrap_or(elements::Sequence::MAX),
             asset_issuance: elements::AssetIssuance::default(),
             witness: elements::TxInWitness::default(),
         });
