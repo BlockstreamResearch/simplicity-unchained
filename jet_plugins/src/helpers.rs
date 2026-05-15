@@ -240,9 +240,9 @@ mod test {
         let single = "single";
         let empty = "";
 
-        assert_eq!(snake_to_pascal_case(&snake), "ValidStr");
-        assert_eq!(snake_to_pascal_case(&single), "Single");
-        assert_eq!(snake_to_pascal_case(&empty), "");
+        assert_eq!(snake_to_pascal_case(snake), "ValidStr");
+        assert_eq!(snake_to_pascal_case(single), "Single");
+        assert_eq!(snake_to_pascal_case(empty), "");
     }
 
     #[test]

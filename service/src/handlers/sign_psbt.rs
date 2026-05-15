@@ -420,7 +420,7 @@ mod tests {
 
         // Verify the signature has the correct format (DER + sighash type)
         let sig_bytes = hex::decode(&response.signature_hex).unwrap();
-        assert!(sig_bytes.len() > 0);
+        assert!(!sig_bytes.is_empty());
         assert_eq!(
             *sig_bytes.last().unwrap(),
             EcdsaSighashType::All.to_u32() as u8
