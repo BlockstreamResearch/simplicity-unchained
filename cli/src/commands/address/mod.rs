@@ -1,5 +1,6 @@
+// TODO: remove when elements updated
+#![allow(dead_code)]
 pub mod multisig;
-pub mod p2tr;
 
 #[derive(Debug)]
 enum ElementsNetwork {

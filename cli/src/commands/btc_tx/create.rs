@@ -95,7 +95,8 @@ fn fetch_tx_output_rpc(txid: &str, vout: u32) -> Result<TxOut> {
         .context("failed to call bitcoin-cli")?;
 
     if !output.status.success() {
-        return Err(anyhow!("bitcoin-cli failed"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("bitcoin-cli failed: stderr={}", stderr,));
     }
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).context("invalid JSON")?;
@@ -133,7 +134,12 @@ fn get_network_kind(network: &str) -> Result<Network> {
     }
 }
 
-pub fn execute(inputs: &[String], outputs: &[String], network: &str) -> Result<()> {
+pub fn execute(
+    inputs: &[String],
+    outputs: &[String],
+    network: &str,
+    sequence: Option<u16>,
+) -> Result<()> {
     let network_type = get_network_kind(network)?;
 
     // Parse inputs (txid:vout)
@@ -156,7 +162,9 @@ pub fn execute(inputs: &[String], outputs: &[String], network: &str) -> Result<(
         tx_inputs.push(TxIn {
             previous_output: OutPoint::new(txid, vout),
             script_sig: ScriptBuf::new(),
-            sequence: bitcoin::Sequence::MAX,
+            sequence: sequence
+                .map(bitcoin::Sequence::from_height)
+                .unwrap_or(bitcoin::Sequence::MAX),
             witness: Default::default(),
         });
     }

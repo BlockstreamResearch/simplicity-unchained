@@ -1,4 +1,5 @@
 mod commands;
+mod demo_script;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -51,23 +52,11 @@ enum AddressCommands {
         #[arg(short = '2', long)]
         pubkey2: String,
 
+        /// User leaf hash in hex format
+        #[arg(long)]
+        user_leaf_hash: String,
+
         /// Network (elements, liquid, liquid_testnet, bitcoin, testnet, testnet4)
-        #[arg(short, long, default_value = "elements")]
-        network: String,
-
-        /// Script type: p2wsh (default) or p2sh
-        #[arg(short, long, default_value = "p2wsh")]
-        type_: String,
-    },
-
-    /// Generate a P2TR (Taproot) address from a single public key.
-    /// The key is used as the internal key and tweaked with the Simplicity CMR.
-    P2tr {
-        /// Public key in hex format (the tweaked co-signer key)
-        #[arg(short, long)]
-        pubkey: String,
-
-        /// Network (elements, liquid, liquid_testnet)
         #[arg(short, long, default_value = "elements")]
         network: String,
     },
@@ -94,6 +83,10 @@ enum BtcTxCommands {
         /// Network (bitcoin, testnet)
         #[arg(short, long, default_value = "bitcoin")]
         network: String,
+
+        /// Relative timelock in blocks for recovery path
+        #[arg(long)]
+        sequence: Option<u16>,
     },
 
     /// Sign a PSBT with one secret key (for co-signing)
@@ -110,13 +103,61 @@ enum BtcTxCommands {
         #[arg(short, long)]
         input_index: usize,
 
-        /// Redeem script in hex format
         #[arg(short, long)]
-        redeem_script: String,
+        cosigner_pubkey: Option<String>,
+
+        /// User leaf script in hex format
+        #[arg(long)]
+        user_leaf_hash: String,
     },
 
     /// Finalize a PSBT into a broadcastable transaction
     Finalize {
+        /// PSBT in hex format
+        #[arg(short, long)]
+        psbt: String,
+    },
+
+    /// Spend the user leaf (Leaf 1) of a P2TR output independently
+    SpendUserLeaf {
+        /// PSBT in hex format
+        #[arg(short, long)]
+        psbt: String,
+
+        /// User secret key in hex format
+        #[arg(short = 'k', long)]
+        secret_key: String,
+
+        /// User leaf script in hex format
+        #[arg(long)]
+        user_leaf_script: String,
+
+        /// Cosigner public key in hex format
+        #[arg(long)]
+        cosigner_pubkey: String,
+
+        /// Input index to sign
+        #[arg(short, long, default_value_t = 0)]
+        input_index: usize,
+
+        /// Network (bitcoin, testnet)
+        #[arg(short, long, default_value = "bitcoin")]
+        network: String,
+    },
+
+    /// Build a CSV recovery leaf script from a user pubkey and timelock
+    BuildCsvLeaf {
+        /// User public key in hex format
+        #[arg(long)]
+        user_pubkey: String,
+
+        /// Timelock in blocks
+        #[arg(long)]
+        timelock: u16,
+    },
+
+    /// Finalize a user leaf (Leaf 1) PSBT into a broadcastable transaction
+    FinalizeUserLeaf {
         /// PSBT in hex format
         #[arg(short, long)]
         psbt: String,
@@ -142,6 +183,10 @@ enum TxCommands {
         /// Network (elements, liquid, liquid_testnet)
         #[arg(short, long, default_value = "elements")]
         network: String,
+
+        /// Relative timelock in blocks for recovery path
+        #[arg(long)]
+        sequence: Option<u16>,
     },
 
     /// Sign a PSET with one secret key (for co-signing)
@@ -158,9 +203,16 @@ enum TxCommands {
         #[arg(short, long)]
         input_index: usize,
 
-        /// Redeem script in hex format
         #[arg(short, long)]
-        redeem_script: String,
+        cosigner_pubkey: String,
+
+        /// User leaf script in hex format
+        #[arg(long)]
+        user_leaf_hash: String,
+
+        /// Network (elements, liquid, liquid_testnet)
+        #[arg(short, long, default_value = "liquid_testnet")]
+        network: String,
     },
 
     /// Finalize a PSET into a broadcastable transaction
@@ -168,6 +220,51 @@ enum TxCommands {
         /// PSET in hex format
         #[arg(short, long)]
         pset: String,
+    },
+
+    /// Spend the user leaf (Leaf 1) of a P2TR output independently
+    SpendUserLeaf {
+        /// PSET in hex format
+        #[arg(short, long)]
+        psbt: String,
+
+        /// User secret key in hex format
+        #[arg(short = 'k', long)]
+        secret_key: String,
+
+        /// User leaf script in hex format
+        #[arg(long)]
+        user_leaf_script: String,
+
+        /// Cosigner public key in hex format
+        #[arg(long)]
+        cosigner_pubkey: String,
+
+        /// Input index to sign
+        #[arg(short, long, default_value_t = 0)]
+        input_index: usize,
+
+        /// Network (elements, liquid, liquid_testnet)
+        #[arg(short, long, default_value = "liquid_testnet")]
+        network: String,
+    },
+
+    /// Build a CSV recovery leaf script from a user pubkey and timelock
+    BuildCsvLeaf {
+        /// User public key in hex format
+        #[arg(long)]
+        user_pubkey: String,
+
+        /// Timelock in blocks
+        #[arg(long)]
+        timelock: u16,
+    },
+
+    /// Finalize a user leaf (Leaf 1) PSBT into a broadcastable transaction
+    FinalizeUserLeaf {
+        /// PSET in hex format
+        #[arg(short, long)]
+        psbt: String,
     },
 }
 
@@ -179,13 +276,10 @@ fn main() -> Result<()> {
             AddressCommands::Multisig {
                 pubkey1,
                 pubkey2,
+                user_leaf_hash,
                 network,
-                type_,
             } => {
-                commands::address::multisig::execute(&pubkey1, &pubkey2, &network, &type_)?;
-            }
-            AddressCommands::P2tr { pubkey, network } => {
-                commands::address::p2tr::execute(&pubkey, &network)?;
+                commands::address::multisig::execute(&pubkey1, &pubkey2, &user_leaf_hash, &network)?
             }
         },
 
@@ -201,21 +295,65 @@ fn main() -> Result<()> {
                 outputs,
                 asset,
                 network,
+                sequence,
             } => {
-                commands::tx::create::execute(&inputs, &outputs, asset.as_deref(), &network)?;
+                commands::tx::create::execute(
+                    &inputs,
+                    &outputs,
+                    asset.as_deref(),
+                    &network,
+                    sequence,
+                )?;
             }
 
             TxCommands::Sign {
                 pset,
                 secret_key,
                 input_index,
-                redeem_script,
+                cosigner_pubkey,
+                user_leaf_hash,
+                network,
             } => {
-                commands::tx::sign::execute(&pset, &secret_key, input_index, &redeem_script)?;
+                commands::tx::sign::execute(
+                    &pset,
+                    &secret_key,
+                    input_index,
+                    &cosigner_pubkey,
+                    &user_leaf_hash,
+                    &network,
+                )?;
             }
 
             TxCommands::Finalize { pset } => {
                 commands::tx::finalize::execute(&pset)?;
+            }
+            TxCommands::SpendUserLeaf {
+                psbt: pset,
+                secret_key,
+                user_leaf_script,
+                cosigner_pubkey,
+                input_index,
+                network,
+            } => {
+                commands::tx::spend_user_leaf::execute(
+                    &pset,
+                    &secret_key,
+                    &user_leaf_script,
+                    &cosigner_pubkey,
+                    input_index,
+                    &network,
+                )?;
+            }
+
+            TxCommands::BuildCsvLeaf {
+                user_pubkey,
+                timelock,
+            } => {
+                demo_script::csv_leaf_elements::build_csv_script(&user_pubkey, timelock)?;
+            }
+
+            TxCommands::FinalizeUserLeaf { psbt: pset } => {
+                demo_script::csv_leaf_elements::finalize_user_leaf(&pset)?;
             }
         },
 
@@ -224,21 +362,58 @@ fn main() -> Result<()> {
                 inputs,
                 outputs,
                 network,
+                sequence,
             } => {
-                commands::btc_tx::create::execute(&inputs, &outputs, &network)?;
+                commands::btc_tx::create::execute(&inputs, &outputs, &network, sequence)?;
             }
 
             BtcTxCommands::Sign {
                 psbt,
                 secret_key,
                 input_index,
-                redeem_script,
+                cosigner_pubkey,
+                user_leaf_hash,
             } => {
-                commands::btc_tx::sign::execute(&psbt, &secret_key, input_index, &redeem_script)?;
+                commands::btc_tx::sign::execute(
+                    &psbt,
+                    &secret_key,
+                    input_index,
+                    cosigner_pubkey.as_deref(),
+                    &user_leaf_hash,
+                )?;
             }
 
             BtcTxCommands::Finalize { psbt } => {
                 commands::btc_tx::finalize::execute(&psbt)?;
+            }
+
+            BtcTxCommands::SpendUserLeaf {
+                psbt,
+                secret_key,
+                user_leaf_script,
+                cosigner_pubkey,
+                input_index,
+                network,
+            } => {
+                commands::btc_tx::spend_user_leaf::execute(
+                    &psbt,
+                    &secret_key,
+                    &user_leaf_script,
+                    &cosigner_pubkey,
+                    input_index,
+                    &network,
+                )?;
+            }
+
+            BtcTxCommands::BuildCsvLeaf {
+                user_pubkey,
+                timelock,
+            } => {
+                demo_script::csv_leaf_btc::build_csv_script(&user_pubkey, timelock)?;
+            }
+
+            BtcTxCommands::FinalizeUserLeaf { psbt } => {
+                demo_script::csv_leaf_btc::finalize_user_leaf(&psbt)?;
             }
         },
     }
