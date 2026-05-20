@@ -23,8 +23,8 @@ By default, service configuration looks for a `config.toml` file in the current 
 ```toml
 [service]
 # Port on which the service will run
-port = 8080
-# secpr256k1 32-byte hex-encoded private key, used for signing
+port = 30431
+# secp256k1 32-byte hex-encoded private key, used for signing
 # this is a demo key, do not use it anywhere else
 private_key = "804622cda0d8e634317a12651d91751ceff5c081f2b5f63ef7912725c7275e5d"
 # Network to get metadata from: liquid or liquidtestnet
@@ -59,9 +59,11 @@ The service exposes the following endpoints:
 {
   "psbt_hex": "70736274ff...",
   "input_index": 0,
-  "redeem_script_hex": "5221...",
   "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
-  "witness": ""
+  "user_pubkey": "02...",
+  "user_leaf_hash_hex": "a1b2c3...",
+  "witness": null,
+  "redeem_script_hex": null
 }
 ```
 
@@ -69,9 +71,11 @@ The service exposes the following endpoints:
 
 - `psbt_hex`: The PSBT (Partially Signed Bitcoin Transaction) encoded as a hexadecimal string
 - `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional, can be an empty string)
 - `program`: The Simplicity program to execute for validation before signing
-- `witness`: The witness data required by the Simplicity program (optional, can be an empty string)
+- `user_pubkey`: The user's compressed public key in hexadecimal format
+- `user_leaf_hash_hex`: The user leaf hash in hexadecimal format, used to reconstruct the taproot tree
+- `witness`: The witness data required by the Simplicity program (optional)
+- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional)
 
 **Success Response**:
 
@@ -102,9 +106,11 @@ The service exposes the following endpoints:
 {
   "pset_hex": "70736574ff...",
   "input_index": 0,
-  "redeem_script_hex": "5221...",
   "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
-  "witness": ""
+  "user_pubkey": "02...",
+  "user_leaf_hash_hex": "a1b2c3...",
+  "witness": null,
+  "redeem_script_hex": null
 }
 ```
 
@@ -112,9 +118,11 @@ The service exposes the following endpoints:
 
 - `pset_hex`: The PSET (Partially Signed Elements Transaction) encoded as a hexadecimal string
 - `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (can be an empty string)
 - `program`: The Simplicity program to execute for validation before signing
-- `witness`: The witness data required by the Simplicity program (can be an empty string)
+- `user_pubkey`: The user's compressed public key in hexadecimal format
+- `user_leaf_hash_hex`: The user leaf hash in hexadecimal format, used to reconstruct the taproot tree
+- `witness`: The witness data required by the Simplicity program (optional)
+- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional)
 
 **Success Response**:
 
@@ -140,7 +148,7 @@ The service exposes the following endpoints:
 
 `POST /simplicity-unchained/tweak`: Accepts a Simplicity program, computes its CMR (commitment Merkle root), and returns the tweaked public key using taproot key tweaking.
 
-### **Note** 
+### **Note**
 
 In P2TR case, key, tweaked with Simplicity CMR, used as inner key.
 
@@ -156,7 +164,7 @@ In P2TR case, key, tweaked with Simplicity CMR, used as inner key.
 **Request Fields**:
 
 - `program`: The Simplicity program to compute the CMR from (must be a non-empty string)
-- `jet_env`: The jet environment to use, either `elements` or `bitcoin`
+- `jet_env`: The jet environment to use, either `elements` or `bitcoin` (optional, defaults to `elements`)
 
 **Success Response**:
 

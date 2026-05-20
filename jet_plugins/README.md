@@ -1,7 +1,9 @@
 # Jet Plugins
+
 Procedural macros for deriving the `Jet` trait for custom jets.
 
-##  Capabilities
+## Capabilities
+
 Given a set of base jets and custom jets, this crate derives the `Jet` trait alongside a C FFI for dynamic jet loading.
 
 Current Limitations:
@@ -11,6 +13,7 @@ Current Limitations:
 - Does not support deriving traits over arbitrary jet sets (other than Bitcoin and Elements). This is due to API limitations within certain internal components of rust-simplicity.
 
 ## Usage example
+
 ```rust
 use jet_plugins::register_jets;
 use simplicity_unchained_core::jets::environments::ElementsUnchainedEnv;

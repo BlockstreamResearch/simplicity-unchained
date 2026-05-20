@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/BlockstreamResearch/simplicity-unchained/security/advisories/new
+    about: Please report security issues privately via GitHub's security advisory feature rather than opening a public issue.

@@ -8,6 +8,10 @@ The primary target is **Bitcoin** (including Bitcoin testnets), with additional 
 >
 > This project is still in active development and conceptualization. It is **not safe for use in production environments** at this time. Features and functionality may change, and there may be critical bugs or incomplete implementations.
 
+## How It Works
+
+See [core/README.md](core/README.md) for a detailed explanation of the unchained model, the taproot tree structure, and the co-signing flow.
+
 ## Project Structure
 
 - [`core`](core/README.md): Contains the fundamental logic for executing Simplicity programs, interacting with Bitcoin and Elements environments and interface for loading custom jet implementations from dynamic libraries. (Note: In the future, parts of this logic may be migrated to [hal-simplicity](https://github.com/BlockstreamResearch/hal-simplicity))
@@ -30,7 +34,7 @@ A live testnet demo is hosted at **[testnet.simplicity-unchained.blockstream.com
 
 ### Bitcoin
 
-You can explore the Bitcoin capabilities by running the [Bitcoin demo script](cli/scripts/demo_bitcoin.sh). This demo guides you through:
+You can explore the Bitcoin capabilities by running the [Bitcoin demo script](cli/scripts/demo_btc.sh). This demo guides you through:
 
 1. Tweaking a public key with a Simplicity program via the Simplicity Unchained service.
 2. Creating a 2-of-2 multisig P2TR address on Bitcoin regtest.
@@ -40,7 +44,7 @@ You can explore the Bitcoin capabilities by running the [Bitcoin demo script](cl
 
 ### Elements / Liquid
 
-The [Elements demo script](cli/scripts/demo.sh) demonstrates the same 2-of-2 multisig co-signing flow on the Liquid Testnet.
+The [Elements demo script](cli/scripts/demo_elements.sh) demonstrates the same 2-of-2 multisig co-signing flow on the Liquid Testnet.
 
 To run either demo, follow the instructions in the [CLI readme](cli/README.md).
 
