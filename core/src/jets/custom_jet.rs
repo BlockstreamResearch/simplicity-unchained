@@ -273,13 +273,25 @@ mod test {
     use super::*;
 
     // --- DLLs for tests ---
+    // Use the cargo-built output from target/debug/ with the platform-appropriate extension
+    // (dylib on macOS, so on Linux) instead of pre-built platform-specific binaries.
     static ELEMENTS_TEST_DLL: LazyLock<Option<Container<CustomJetApi>>> =
         LazyLock::new(|| unsafe {
-            Container::<CustomJetApi>::load("../cli/assets/custom_jet_dlls/libelements.so").ok()
+            let path = format!(
+                "{}/../target/debug/libelements.{}",
+                env!("CARGO_MANIFEST_DIR"),
+                std::env::consts::DLL_EXTENSION
+            );
+            Container::<CustomJetApi>::load(&path).ok()
         });
 
     static CORE_TEST_DLL: LazyLock<Option<Container<CustomJetApi>>> = LazyLock::new(|| unsafe {
-        Container::<CustomJetApi>::load("../cli/assets/custom_jet_dlls/libbitcoin.so").ok()
+        let path = format!(
+            "{}/../target/debug/libbitcoin.{}",
+            env!("CARGO_MANIFEST_DIR"),
+            std::env::consts::DLL_EXTENSION
+        );
+        Container::<CustomJetApi>::load(&path).ok()
     });
 
     struct ElementsTestApi;

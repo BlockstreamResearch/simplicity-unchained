@@ -201,10 +201,12 @@ mod tests {
     use hal_simplicity::simplicity::elements::pset::PartiallySignedTransaction;
 
     static TEST_DLL: LazyLock<Option<Container<CustomJetApi>>> = LazyLock::new(|| unsafe {
-        Container::<CustomJetApi>::load(
-            "../cli/assets/custom_jet_dlls/libopcode_pubkey_elements.so",
-        )
-        .ok()
+        let path = format!(
+            "{}/../target/debug/libopcode_pubkey_elements.{}",
+            env!("CARGO_MANIFEST_DIR"),
+            std::env::consts::DLL_EXTENSION
+        );
+        Container::<CustomJetApi>::load(&path).ok()
     });
 
     struct TestApi;

@@ -27,6 +27,7 @@ jobs:
         with:
           toolchain: 1.92.0
       - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
 
   clippy:
