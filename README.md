@@ -4,6 +4,9 @@ Simplicity Unchained brings [Simplicity](https://simplicity-lang.org/) to Bitcoi
 
 The primary target is **Bitcoin** (including Bitcoin testnets), with additional support for Elements-based networks such as Liquid.
 
+<img width="876" height="941" alt="image" src="https://github.com/user-attachments/assets/bf986a57-7605-42d5-b6a9-d14ea49a6899" />
+
+
 > ⚠️ **Warning: Project Under Development**
 >
 > This project is still in active development and conceptualization. It is **not safe for use in production environments** at this time. Features and functionality may change, and there may be critical bugs or incomplete implementations.
