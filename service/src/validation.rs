@@ -1,4 +1,4 @@
-use hal_simplicity::bitcoin;
+use simplicity::bitcoin;
 use validator::ValidationError;
 
 pub fn validate_hex(hex: &str) -> Result<(), ValidationError> {
