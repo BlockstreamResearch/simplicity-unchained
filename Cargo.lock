@@ -216,15 +216,6 @@ dependencies = [
 
 [[package]]
 name = "bitcoin"
-version = "0.1.0"
-dependencies = [
- "core",
- "hal-simplicity",
- "jet_plugins",
-]
-
-[[package]]
-name = "bitcoin"
 version = "0.32.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e499f9fc0407f50fe98af744ab44fa67d409f76b6772e1689ec8485eb0c0f66"
@@ -517,21 +508,12 @@ dependencies = [
 
 [[package]]
 name = "elements"
-version = "0.1.0"
-dependencies = [
- "core",
- "hal-simplicity",
- "jet_plugins",
-]
-
-[[package]]
-name = "elements"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81b2569d3495bfdfce36c504fd4d78752ff4a7699f8a33e6f3ee523bddf9f6ad"
 dependencies = [
  "bech32",
- "bitcoin 0.32.8",
+ "bitcoin",
  "secp256k1-zkp",
  "serde",
  "serde_json",
@@ -720,7 +702,7 @@ checksum = "f57a34f3cc18f2967a98c61abea03b1b9521075e880b18f45b63561a88c3c174"
 dependencies = [
  "base64-compat",
  "bip39",
- "bitcoin 0.32.8",
+ "bitcoin",
  "byteorder",
  "chrono",
  "clap 2.33.3",
@@ -745,7 +727,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52a540615bef9124e283bbd087e007af922c9f6cfac210412bda4d1c34b2a74d"
 dependencies = [
  "clap 2.33.3",
- "elements 0.25.2",
+ "elements",
  "fern",
  "hal",
  "hex 0.3.2",
@@ -1178,7 +1160,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11209f386879b97198b2bfc9e9c1e5d42870825c6bd4376f17f95357244d6600"
 dependencies = [
  "bech32",
- "bitcoin 0.32.8",
+ "bitcoin",
  "lightning-types",
 ]
 
@@ -1188,7 +1170,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2cd84d4e71472035903e43caded8ecc123066ce466329ccd5ae537a8d5488c7"
 dependencies = [
- "bitcoin 0.32.8",
+ "bitcoin",
 ]
 
 [[package]]
@@ -1240,7 +1222,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "487906208f38448e186e3deb02f2b8ef046a9078b0de00bdb28bf4fb9b76951c"
 dependencies = [
  "bech32",
- "bitcoin 0.32.8",
+ "bitcoin",
 ]
 
 [[package]]
@@ -1300,24 +1282,6 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
-
-[[package]]
-name = "opcode_pubkey_bitcoin"
-version = "0.1.0"
-dependencies = [
- "core",
- "hal-simplicity",
- "jet_plugins",
-]
-
-[[package]]
-name = "opcode_pubkey_elements"
-version = "0.1.0"
-dependencies = [
- "core",
- "hal-simplicity",
- "jet_plugins",
-]
 
 [[package]]
 name = "openssl"
@@ -1804,10 +1768,10 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70e57bd4d84853974a212eab24ed89da54f49fbccf5e33e93bcd29f0a6591cd5"
 dependencies = [
- "bitcoin 0.32.8",
+ "bitcoin",
  "bitcoin_hashes",
  "byteorder",
- "elements 0.25.2",
+ "elements",
  "getrandom 0.2.16",
  "ghost-cell",
  "hex-conservative",
