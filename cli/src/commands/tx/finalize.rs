@@ -1,11 +1,11 @@
 use anyhow::{Context, Result, anyhow};
-use hal_simplicity::simplicity::elements::taproot::TapLeafHash;
-use hal_simplicity::simplicity::elements::{
+use serde_json::json;
+use simplicity::elements::taproot::TapLeafHash;
+use simplicity::elements::{
     Transaction,
     encode::{deserialize, serialize},
     pset::{self, PartiallySignedTransaction},
 };
-use serde_json::json;
 use simplicity_unchained_core::utils::extract_pubkeys_from_p2tr_multisig_leaf_elements;
 
 pub fn execute(pset_hex: &str) -> Result<()> {
@@ -94,7 +94,8 @@ fn finalize_p2tr(tx: &mut Transaction, i: usize, input: &pset::Input) -> Result<
         cosigner_sig.to_vec(),
         leaf_script.to_bytes(),
         control_block.serialize(),
-    ];
+    ]
+    .into();
 
     Ok(())
 }

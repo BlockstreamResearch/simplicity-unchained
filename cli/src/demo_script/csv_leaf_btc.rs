@@ -1,13 +1,13 @@
 //! Timelocked user script for demo purposes
 use anyhow::{Context, Result, anyhow};
-use hal_simplicity::{
-    bitcoin::{
-        self, Psbt, TapLeafHash, Transaction, Witness, consensus::serialize, hashes::Hash, psbt,
-        taproot::LeafVersion,
-    },
-    simplicity::{ToXOnlyPubkey, bitcoin::PublicKey},
-};
 use serde_json::json;
+use simplicity::{
+    ToXOnlyPubkey,
+    bitcoin::{
+        self, Psbt, PublicKey, TapLeafHash, Transaction, Witness, consensus::serialize,
+        hashes::Hash, psbt, taproot::LeafVersion,
+    },
+};
 use std::str::FromStr;
 
 pub fn build_csv_script(user_pubkey_hex: &str, timelock: u16) -> Result<()> {

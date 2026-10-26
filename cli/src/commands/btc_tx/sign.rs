@@ -1,11 +1,9 @@
 use anyhow::{Context, Result};
-use hal_simplicity::bitcoin::taproot::{LeafVersion, TaprootBuilder};
-use hal_simplicity::bitcoin::{self, TapNodeHash};
-use hal_simplicity::simplicity::bitcoin::{
-    PublicKey, hashes::Hash, psbt::Psbt, sighash::SighashCache,
-};
-use hal_simplicity::simplicity::elements::secp256k1_zkp::{Message, Secp256k1, SecretKey};
 use serde_json::json;
+use simplicity::bitcoin::taproot::{LeafVersion, TaprootBuilder};
+use simplicity::bitcoin::{self, TapNodeHash};
+use simplicity::bitcoin::{PublicKey, hashes::Hash, psbt::Psbt, sighash::SighashCache};
+use simplicity::elements::secp256k1_zkp::{Message, Secp256k1, SecretKey};
 use simplicity_unchained_core::utils::{UNSPENDABLE_KEY_P2TR, p2tr_multisig_leaf_btc};
 
 pub fn execute(
@@ -34,9 +32,9 @@ pub fn execute(
 
     let public_key = PublicKey::from_private_key(
         &secp,
-        &hal_simplicity::simplicity::elements::bitcoin::PrivateKey {
+        &simplicity::elements::bitcoin::PrivateKey {
             compressed: true,
-            network: hal_simplicity::simplicity::elements::bitcoin::NetworkKind::Main,
+            network: simplicity::elements::bitcoin::NetworkKind::Main,
             inner: secret_key,
         },
     );

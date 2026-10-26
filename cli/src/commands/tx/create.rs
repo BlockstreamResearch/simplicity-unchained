@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 
-use hal_simplicity::simplicity::elements;
+use simplicity::elements;
 
 use elements::{
     Address, AddressParams, AssetId, OutPoint, Transaction, TxIn, TxOut, confidential,
