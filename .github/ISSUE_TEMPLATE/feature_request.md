@@ -16,7 +16,7 @@ assignees: ""
 
 ## Affected crate(s)
 
-<!-- Which crate(s) would this touch? core / service / cli / jet_plugins -->
+<!-- Which crate(s) would this touch? core / service / cli -->
 
 ## Alternatives considered
 

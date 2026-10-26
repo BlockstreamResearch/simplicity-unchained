@@ -27,7 +27,7 @@ assignees: ""
 - **OS**: <!-- e.g. Ubuntu 24.04, macOS 15 -->
 - **Rust version**: <!-- output of `rustc --version` -->
 - **Commit / tag**: <!-- git rev-parse --short HEAD -->
-- **Affected crate(s)**: <!-- core / service / cli / jet_plugins -->
+- **Affected crate(s)**: <!-- core / service / cli -->
 
 ## Logs
 
