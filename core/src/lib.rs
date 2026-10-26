@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
-use hal_simplicity::bitcoin::NetworkKind;
-use hal_simplicity::simplicity::elements::BlockHash;
-use hal_simplicity::simplicity::elements::hashes::Hash;
+use simplicity::bitcoin::NetworkKind;
+use simplicity::elements::BlockHash;
 
 pub mod jets;
+pub mod program;
 pub mod runner;
 pub mod utils;
 

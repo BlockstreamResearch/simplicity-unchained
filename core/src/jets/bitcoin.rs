@@ -1,20 +1,15 @@
-use std::collections::HashMap;
 use std::io::Write;
 use std::mem::MaybeUninit;
-use std::sync::LazyLock;
 
-use hal_simplicity::simplicity::Cmr;
-use hal_simplicity::simplicity::Cost;
-use hal_simplicity::simplicity::ffi::CFrameItem;
-use hal_simplicity::simplicity::jet::type_name::TypeName;
-use hal_simplicity::simplicity::jet::{Core, Jet};
-use hal_simplicity::simplicity::{BitIter, BitWriter, decode};
+use simplicity::Cmr;
+use simplicity::Cost;
+use simplicity::ffi::CFrameItem;
+use simplicity::jet::type_name::TypeName;
+use simplicity::jet::{Core, CoreEnv, Jet, JetEnvironment};
+use simplicity::{BitIter, BitWriter, decode};
 
-use super::environments::UnchainedEnv;
-
-type CJetPtr = dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<()>) -> bool + Send + Sync;
-static C_JET_PTRS: LazyLock<HashMap<CoreExtension, &'static CJetPtr>> =
-    LazyLock::new(|| build_c_jet_ptrs());
+use super::base::base_c_jet_ptr;
+use super::environments::BitcoinUnchainedEnv;
 
 // Local version of decode_bits macro that accepts expressions instead of just paths
 macro_rules! decode_bits {
@@ -88,48 +83,30 @@ impl CoreExtension {
     }
 }
 
-fn build_c_jet_ptrs() -> HashMap<CoreExtension, &'static CJetPtr> {
-    CoreExtension::ALL
-        .iter()
-        .map(|jet| {
-            let boxed: Box<CJetPtr> = match jet {
-                // rest of elements jets
-                CoreExtension::Core(inner_jet) => Box::new(
-                    move |dst: &mut CFrameItem, src: CFrameItem, _: &UnchainedEnv<()>| -> bool {
-                        inner_jet.c_jet_ptr()(dst, src, &())
-                    },
-                ),
-                // custom jets
-                CoreExtension::GetOpcodeFromScript => Box::new(
-                    move |dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv<()>| -> bool {
-                        super::exec::get_opcode_from_script(dst, src, env)
-                    },
-                ),
-                CoreExtension::GetPubkeyFromScript => Box::new(
-                    move |dst: &mut CFrameItem, src: CFrameItem, env: &UnchainedEnv<()>| -> bool {
-                        super::exec::get_pubkey_from_script(dst, src, env)
-                    },
-                ),
-            };
-            let leaked: &'static (
-                         dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<()>) -> bool
-                             + Send
-                             + Sync
-                     ) = Box::leak(boxed);
-            (*jet, leaked)
-        })
-        .collect()
-}
-impl Jet for CoreExtension {
-    type Environment = UnchainedEnv<()>;
-    type CJetEnvironment = UnchainedEnv<()>;
+impl JetEnvironment for BitcoinUnchainedEnv {
+    type Jet = CoreExtension;
+    type CJetEnvironment = Self;
 
-    fn c_jet_env(env: &Self::Environment) -> &Self::CJetEnvironment {
+    fn c_jet_env(&self) -> &Self::CJetEnvironment {
         // For the time being, we are goint to use the initial environment for unchained jets,
         // as we are going to implement them in rust.
-        env
+        self
     }
 
+    fn c_jet_ptr(
+        jet: &Self::Jet,
+    ) -> fn(&mut CFrameItem, CFrameItem, &Self::CJetEnvironment) -> bool {
+        match jet {
+            // rest of elements jets
+            CoreExtension::Core(inner_jet) => base_c_jet_ptr(inner_jet),
+            // custom jets
+            CoreExtension::GetOpcodeFromScript => super::exec::get_opcode_from_script::<CoreEnv>,
+            CoreExtension::GetPubkeyFromScript => super::exec::get_pubkey_from_script::<CoreEnv>,
+        }
+    }
+}
+
+impl Jet for CoreExtension {
     fn cmr(&self) -> Cmr {
         if let CoreExtension::Core(inner_jet) = self {
             return inner_jet.cmr();
@@ -180,7 +157,7 @@ impl Jet for CoreExtension {
         TypeName(name)
     }
 
-    fn encode<W: Write>(&self, w: &mut BitWriter<W>) -> std::io::Result<usize> {
+    fn encode(&self, w: &mut BitWriter<&mut dyn Write>) -> std::io::Result<usize> {
         if let CoreExtension::Core(inner_jet) = self {
             return inner_jet.encode(w);
         }
@@ -257,12 +234,6 @@ impl Jet for CoreExtension {
         try_custom
     }
 
-    fn c_jet_ptr(&self) -> &dyn Fn(&mut CFrameItem, CFrameItem, &Self::CJetEnvironment) -> bool {
-        C_JET_PTRS
-            .get(self)
-            .expect("All enum variants should be initialized")
-    }
-
     fn cost(&self) -> Cost {
         if let CoreExtension::Core(inner_jet) = self {
             return inner_jet.cost();
@@ -274,6 +245,10 @@ impl Jet for CoreExtension {
             CoreExtension::GetPubkeyFromScript => Cost::from_milliweight(100),
             _ => unreachable!(),
         }
+    }
+
+    fn parse(s: &str) -> Result<Self, simplicity::Error> {
+        s.parse()
     }
 }
 
@@ -288,7 +263,7 @@ impl std::fmt::Display for CoreExtension {
 }
 
 impl std::str::FromStr for CoreExtension {
-    type Err = hal_simplicity::simplicity::Error;
+    type Err = simplicity::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {

@@ -1,3 +1,4 @@
+pub mod base;
 pub mod bitcoin;
 pub mod elements;
 pub mod environments;
@@ -8,31 +9,29 @@ mod tests {
     use std::ptr;
     use std::sync::Arc;
 
-    use hal_simplicity::simplicity::Cmr;
-    use hal_simplicity::simplicity::elements::taproot::ControlBlock;
-    use hal_simplicity::simplicity::elements::{
-        AssetIssuance, BlockHash, LockTime, OutPoint, Sequence, Transaction, TxIn, TxInWitness,
-        hashes::Hash,
-    };
-    use hal_simplicity::simplicity::jet::elements::ElementsEnv;
     use hex_literal::hex;
+    use simplicity::Cmr;
+    use simplicity::elements::taproot::ControlBlock;
+    use simplicity::elements::{
+        AssetIssuance, BlockHash, LockTime, OutPoint, Sequence, Transaction, TxIn, TxInWitness,
+    };
+    use simplicity::jet::elements::ElementsEnv;
 
-    use crate::jets::environments::UnchainedEnv;
+    use crate::jets::environments::{ElementsUnchainedEnv, UnchainedEnv};
     use crate::jets::{bitcoin::CoreExtension, elements::ElementsExtension};
-    use hal_simplicity::simplicity::elements::Script;
-    use hal_simplicity::simplicity::elements::hex::FromHex;
-    use hal_simplicity::simplicity::elements::opcodes::all::OP_PUSHNUM_2;
-    use hal_simplicity::simplicity::ffi::CFrameItem;
-    use hal_simplicity::simplicity::ffi::c_jets::c_frame::uword_width;
-    use hal_simplicity::simplicity::ffi::ffi::UWORD;
-    use hal_simplicity::simplicity::jet::Jet;
-    use hal_simplicity::simplicity::{BitIter, BitWriter};
+    use simplicity::elements::Script;
+    use simplicity::elements::opcodes::all::OP_PUSHNUM_2;
+    use simplicity::ffi::CFrameItem;
+    use simplicity::ffi::c_jets::c_frame::uword_width;
+    use simplicity::ffi::ffi::UWORD;
+    use simplicity::jet::{Jet, JetEnvironment};
+    use simplicity::{BitIter, BitWriter};
 
     #[test]
     fn test_new_jets_decode() {
         for expected_jet in ElementsExtension::ALL {
             let mut source = vec![];
-            let mut writer = BitWriter::new(&mut source);
+            let mut writer = BitWriter::new(&mut source as &mut dyn std::io::Write);
 
             let _ = expected_jet.encode(&mut writer).unwrap();
 
@@ -48,7 +47,7 @@ mod tests {
 
         for expected_jet in CoreExtension::ALL {
             let mut source = vec![];
-            let mut writer = BitWriter::new(&mut source);
+            let mut writer = BitWriter::new(&mut source as &mut dyn std::io::Write);
 
             let _ = expected_jet.encode(&mut writer).unwrap();
 
@@ -65,7 +64,7 @@ mod tests {
 
     #[test]
     fn test_get_opcode() {
-        let script = Script::from_hex(
+        let script = Script::from_hex_no_prefix(
             "5221033523982d58e94be3b735731593f8225043880d53727235b566c515d24a0f7baf21025eb4655feae15a304653e27441ca8e8ced2bef89c22ab6b20424b4c07b3d14cc52ae"
         ).unwrap();
 
@@ -82,7 +81,7 @@ mod tests {
             let mut dst_frame = CFrameItem::new_write(8, dst_data.as_mut_ptr().add(output_uwords));
 
             let jet = ElementsExtension::GetOpcodeFromScript;
-            let jet_fn = jet.c_jet_ptr();
+            let jet_fn = ElementsUnchainedEnv::c_jet_ptr(&jet);
             let result = jet_fn(&mut dst_frame, src_frame, &env);
 
             assert!(result);
@@ -99,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_get_pubkey_from_script() {
-        let script = Script::from_hex(
+        let script = Script::from_hex_no_prefix(
             "5221033523982d58e94be3b735731593f8225043880d53727235b566c515d24a0f7baf21025eb4655feae15a304653e27441ca8e8ced2bef89c22ab6b20424b4c07b3d14cc52ae"
         ).unwrap();
 
@@ -118,7 +117,7 @@ mod tests {
                 CFrameItem::new_write(OUTPUT_BITS, dst_data.as_mut_ptr().add(output_uwords));
 
             let jet = ElementsExtension::GetPubkeyFromScript;
-            let jet_fn = jet.c_jet_ptr();
+            let jet_fn = ElementsUnchainedEnv::c_jet_ptr(&jet);
             let result = jet_fn(&mut dst_frame, src_frame, &env);
 
             assert!(result);
@@ -168,7 +167,7 @@ mod tests {
             Cmr::from_byte_array([0; 32]),
             ControlBlock::from_slice(&ctrl_blk).unwrap(),
             None,
-            BlockHash::all_zeros(),
+            BlockHash::from_byte_array([0; 32]),
         )
     }
 }

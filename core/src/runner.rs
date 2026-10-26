@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use hal_simplicity::hal_simplicity::Program;
-use hal_simplicity::simplicity::BitMachine;
-use hal_simplicity::simplicity::bit_machine::ExecutionError;
-use hal_simplicity::simplicity::bitcoin::psbt;
-use hal_simplicity::simplicity::elements::taproot::{LeafVersion, TaprootMerkleBranch};
-use hal_simplicity::simplicity::elements::{BlockHash, Script};
-use hal_simplicity::simplicity::elements::{Transaction, pset, schnorr::UntweakedPublicKey};
-use hal_simplicity::simplicity::{
+use simplicity::BitMachine;
+use simplicity::bit_machine::ExecutionError;
+use simplicity::bitcoin::psbt;
+use simplicity::elements::taproot::{LeafVersion, TaprootMerkleBranch};
+use simplicity::elements::{BlockHash, Script};
+use simplicity::elements::{Transaction, pset, schnorr::UntweakedPublicKey};
+use simplicity::{
     Cmr,
     elements::taproot::ControlBlock,
+    jet::CoreEnv,
     jet::elements::{ElementsEnv, ElementsUtxo},
 };
 
@@ -18,6 +18,7 @@ use hex_literal::hex;
 use crate::jets::bitcoin::CoreExtension;
 use crate::jets::elements::ElementsExtension;
 use crate::jets::environments::UnchainedEnv;
+use crate::program::Program;
 use crate::{BitcoinNetwork, ElementsNetwork};
 
 pub struct SimplicityRunner;
@@ -27,26 +28,23 @@ pub enum RunnerError {
     #[error("input index {index} out-of-range for PSET with {total} inputs")]
     InputIndexOutOfRange { index: usize, total: usize },
 
-    #[error("failed to parse genesis hash: {0}")]
-    GenesisHashParse(hal_simplicity::simplicity::elements::hashes::hex::HexToArrayError),
-
     #[error("could not find Simplicity leaf in PSET taptree with CMR {cmr})")]
     MissingSimplicityLeaf { cmr: String },
 
     #[error("failed to extract transaction from PSET: {0}")]
-    PsetExtract(hal_simplicity::simplicity::elements::pset::Error),
+    PsetExtract(simplicity::elements::pset::Error),
 
     #[error("witness_utxo field not populated for input {0}")]
     MissingWitnessUtxo(usize),
 
     #[error("invalid program: {0}")]
-    ProgramParse(hal_simplicity::simplicity::ParseError),
+    ProgramParse(simplicity::ParseError),
 
     #[error("program does not have a redeem node")]
     NoRedeemNode,
 
     #[error("failed to construct bit machine: {0}")]
-    BitMachineConstruction(hal_simplicity::simplicity::bit_machine::LimitError),
+    BitMachineConstruction(simplicity::bit_machine::LimitError),
 
     #[error("execution error: {0}")]
     ExecutionError(ExecutionError),
@@ -92,7 +90,7 @@ impl SimplicityRunner {
         let program = Program::<CoreExtension>::from_str(program, witness)
             .map_err(RunnerError::ProgramParse)?;
 
-        let env = UnchainedEnv::new(redeem_script, ());
+        let env = UnchainedEnv::new(redeem_script, CoreEnv::new());
 
         let redeem_node = program.redeem_node().ok_or(RunnerError::NoRedeemNode)?;
 
@@ -154,7 +152,7 @@ fn dummy_control_block() -> ControlBlock {
     ControlBlock {
         leaf_version,
         internal_key,
-        output_key_parity: hal_simplicity::simplicity::elements::secp256k1_zkp::Parity::Even,
+        output_key_parity: simplicity::elements::secp256k1_zkp::Parity::Even,
         merkle_branch: TaprootMerkleBranch::default(),
     }
 }
