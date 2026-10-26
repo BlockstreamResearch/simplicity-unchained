@@ -1764,7 +1764,6 @@ dependencies = [
  "base64 0.22.1",
  "clap 4.5.53",
  "core",
- "dlopen2",
  "hal-simplicity",
  "hex 0.4.3",
  "log",
