@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "cli",
     "core",
+    "jet_plugin_abi",
     "service",
 ]
 
