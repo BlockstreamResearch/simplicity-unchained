@@ -5,7 +5,7 @@ pub mod environments;
 pub mod exec;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::ptr;
     use std::sync::Arc;
 
@@ -141,7 +141,7 @@ mod tests {
         }
     }
 
-    fn dummy_elements_env() -> ElementsEnv<Arc<Transaction>> {
+    pub(crate) fn dummy_elements_env() -> ElementsEnv<Arc<Transaction>> {
         let ctrl_blk: [u8; 33] = [
             0xc0, 0xeb, 0x04, 0xb6, 0x8e, 0x9a, 0x26, 0xd1, 0x16, 0x04, 0x6c, 0x76, 0xe8, 0xff,
             0x47, 0x33, 0x2f, 0xb7, 0x1d, 0xda, 0x90, 0xff, 0x4b, 0xef, 0x53, 0x70, 0xf2, 0x52,

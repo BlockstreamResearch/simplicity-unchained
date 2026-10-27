@@ -13,3 +13,8 @@ hex-literal = "1.1.0"
 simplicity-lang = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
+dlopen2 = "0.8.2"
+jet_plugin_abi = { path = "../jet_plugin_abi" }
+
+[dev-dependencies]
+script_jets = { path = "../plugin_tests/script_jets" }
