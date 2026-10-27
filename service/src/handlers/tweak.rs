@@ -1,16 +1,18 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
-use hal_simplicity::{
+use simplicity::{
     bitcoin::{self, secp256k1},
-    hal_simplicity::Program,
-    simplicity::elements::{self, schnorr::TapTweak},
+    elements::{self, schnorr::TapTweak},
 };
 
-use elements::{bitcoin::PublicKey, hashes::Hash};
+use bitcoin::hashes::Hash;
+use elements::bitcoin::PublicKey;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+use simplicity_unchained_core::jets::bitcoin::CoreExtension;
 use simplicity_unchained_core::jets::elements::ElementsExtension;
+use simplicity_unchained_core::program::Program;
 
 use crate::handlers::{ErrorResponse, SignerState};
 
@@ -84,7 +86,7 @@ fn get_tweaked_key_bitcoin(
 ) -> Result<TweakResponse, String> {
     // Parse Simplicity program and get CMR from commitment
     let cmr = {
-        let program = Program::<ElementsExtension>::from_str(&request.program, None)
+        let program = Program::<CoreExtension>::from_str(&request.program, None)
             .map_err(|e| format!("Failed to parse program: {}", e))?;
 
         program.commit_prog().cmr()

@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, anyhow};
-use hal_simplicity::bitcoin::{
+use serde_json::json;
+use simplicity::bitcoin::{
     self, Psbt, TapLeafHash, Transaction, Witness, consensus::serialize, psbt, taproot::LeafVersion,
 };
-use serde_json::json;
 use simplicity_unchained_core::utils::extract_pubkeys_from_p2tr_multisig_leaf_btc;
 
 pub fn execute(psbt_hex: &str) -> Result<()> {

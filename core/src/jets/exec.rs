@@ -1,23 +1,27 @@
-use hal_simplicity::simplicity::{
+use simplicity::{
     elements::{Transaction, opcodes::all::OP_PUSHBYTES_33},
     ffi::CFrameItem,
+    ffi::c_jets::frame_ffi::{c_readBit, c_writeBit},
 };
 
 use crate::jets::environments::ElementsUnchainedEnv;
 
 use super::environments::UnchainedEnv;
 
-#[allow(unused)]
-unsafe extern "C" {
-    fn rustsimplicity_0_6_write8(dst: *mut CFrameItem, n: u64);
-    fn rustsimplicity_0_6_write16(dst: *mut CFrameItem, n: u16);
-    fn rustsimplicity_0_6_write32(dst: *mut CFrameItem, n: u32);
-    fn rustsimplicity_0_6_write64(dst: *mut CFrameItem, n: u64);
+/// Reads a big-endian `n`-bit value from a C read frame.
+fn read_bits(src: &mut CFrameItem, n: u32) -> u64 {
+    let mut value = 0;
+    for _ in 0..n {
+        value = (value << 1) | u64::from(unsafe { c_readBit(src) });
+    }
+    value
+}
 
-    fn rustsimplicity_0_6_read8(src: *const CFrameItem) -> u64;
-    fn rustsimplicity_0_6_read16(src: *const CFrameItem) -> u16;
-    fn rustsimplicity_0_6_read32(src: *const CFrameItem) -> u32;
-    fn rustsimplicity_0_6_read64(src: *const CFrameItem) -> u64;
+/// Writes the low `n` bits of `value`, big-endian, to a C write frame.
+fn write_bits(dst: &mut CFrameItem, value: u64, n: u32) {
+    for i in (0..n).rev() {
+        unsafe { c_writeBit(dst, (value >> i) & 1 == 1) };
+    }
 }
 
 /// 2^8 |- 2^8
@@ -25,19 +29,17 @@ unsafe extern "C" {
 /// Returns the opcode at the given index in the redeem script, each opcode is one byte.
 pub fn get_opcode_from_script<E>(
     dst: &mut CFrameItem,
-    src: CFrameItem,
+    mut src: CFrameItem,
     env: &UnchainedEnv<E>,
 ) -> bool {
-    let index = unsafe { rustsimplicity_0_6_read8(&src as *const CFrameItem) } as usize;
+    let index = read_bits(&mut src, 8) as usize;
     if index >= env.redeem_script.len() {
         return false;
     }
 
     let opcode = env.redeem_script.as_bytes()[index];
 
-    unsafe {
-        rustsimplicity_0_6_write8(dst as *mut CFrameItem, opcode as u64);
-    }
+    write_bits(dst, opcode.into(), 8);
 
     true
 }
@@ -46,10 +48,10 @@ pub fn get_opcode_from_script<E>(
 /// Each pubkey is encoded as: [OP_PUSHBYTES_33][0x02 or 0x03][32 bytes X coordinate]
 pub fn get_pubkey_from_script<E>(
     dst: &mut CFrameItem,
-    src: CFrameItem,
+    mut src: CFrameItem,
     env: &UnchainedEnv<E>,
 ) -> bool {
-    let start_index = unsafe { rustsimplicity_0_6_read8(&src as *const CFrameItem) } as usize;
+    let start_index = read_bits(&mut src, 8) as usize;
     if start_index + 34 > env.redeem_script.len() {
         return false;
     }
@@ -74,9 +76,7 @@ pub fn get_pubkey_from_script<E>(
         .collect::<Vec<u32>>();
 
     for word in words.iter() {
-        unsafe {
-            rustsimplicity_0_6_write32(dst as *mut CFrameItem, *word);
-        }
+        write_bits(dst, (*word).into(), 32);
     }
 
     true
@@ -87,7 +87,7 @@ pub fn get_pubkey_from_script<E>(
 /// 2^16 |- ONE
 pub fn check_lock_duration(
     _dst: &mut CFrameItem,
-    src: CFrameItem,
+    mut src: CFrameItem,
     env: &ElementsUnchainedEnv,
 ) -> bool {
     let (tx, ix) = (env.env.tx(), env.env.ix());
@@ -96,14 +96,14 @@ pub fn check_lock_duration(
         return false;
     }
 
-    let req_duration = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
+    let req_duration = read_bits(&mut src, 16) as u16;
     req_duration <= lock_duration(tx, ix)
 }
 
 /// 2^16 |- ONE
 pub fn check_lock_distance(
     _dst: &mut CFrameItem,
-    src: CFrameItem,
+    mut src: CFrameItem,
     env: &ElementsUnchainedEnv,
 ) -> bool {
     let (tx, ix) = (env.env.tx(), env.env.ix());
@@ -112,7 +112,7 @@ pub fn check_lock_distance(
         return false;
     }
 
-    let req_distance = unsafe { rustsimplicity_0_6_read16(&src as *const CFrameItem) };
+    let req_distance = read_bits(&mut src, 16) as u16;
     req_distance <= lock_distance(tx, ix)
 }
 
@@ -128,7 +128,7 @@ pub fn tx_lock_duration(
         return false;
     }
 
-    unsafe { rustsimplicity_0_6_write16(dst, lock_duration(tx, ix)) };
+    write_bits(dst, lock_duration(tx, ix).into(), 16);
     true
 }
 
@@ -144,7 +144,7 @@ pub fn tx_lock_distance(
         return false;
     }
 
-    unsafe { rustsimplicity_0_6_write16(dst, lock_distance(tx, ix)) };
+    write_bits(dst, lock_distance(tx, ix).into(), 16);
     true
 }
 

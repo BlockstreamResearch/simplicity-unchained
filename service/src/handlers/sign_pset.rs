@@ -2,9 +2,9 @@ use std::str::FromStr;
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
-use hal_simplicity::{
+use simplicity::{
     bitcoin::{self},
-    simplicity::elements::{
+    elements::{
         self, SchnorrSig, SchnorrSighashType, Transaction, TxOut,
         encode::Encodable,
         schnorr::{TapTweak, TweakedKeypair, UntweakedKeypair},
@@ -14,7 +14,7 @@ use hal_simplicity::{
 };
 
 use elements::{
-    encode::deserialize, hashes::Hash, pset::PartiallySignedTransaction, secp256k1_zkp::Message,
+    encode::deserialize, pset::PartiallySignedTransaction, secp256k1_zkp::Message,
     sighash::SighashCache,
 };
 use serde::{Deserialize, Serialize};
@@ -122,16 +122,20 @@ fn sign_pset_internal(
         let bytes = hex::decode(&request.user_leaf_hash_hex)
             .map_err(|e| format!("Failed to decode user leaf hash hex: {}", e))?;
 
-        elements::hashes::sha256::Hash::from_slice(&bytes).map_err(|e| e.to_string())?
+        let bytes: [u8; 32] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("invalid slice length {} (expected 32)", bytes.len()))?;
+        elements::hashes::sha256::Hash::from_byte_array(bytes)
     };
 
     let redeem_script = match request.redeem_script_hex {
         Some(str) => {
             let bytes = hex::decode(str)
                 .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
-            hal_simplicity::simplicity::elements::Script::from(bytes)
+            simplicity::elements::Script::from(bytes)
         }
-        None => hal_simplicity::simplicity::elements::Script::new(),
+        None => simplicity::elements::Script::new(),
     };
 
     let cmr = SimplicityRunner::execute_elements(
@@ -204,7 +208,10 @@ fn sign_p2tr(
     let spend_info = TaprootBuilder::new()
         .add_leaf(1, multisig_leaf.clone())
         .map_err(|e| format!("Failed to add multisig leaf: {}", e))?
-        .add_hidden(1, user_leaf_hash)
+        .add_hidden(
+            1,
+            TapNodeHash::from_byte_array(user_leaf_hash.to_byte_array()),
+        )
         .map_err(|e| format!("Failed to add recovery leaf: {}", e))?
         .finalize(secp, *UNSPENDABLE_KEY_P2TR)
         .map_err(|_| "Failed to finalize taproot".to_string())?;
@@ -259,9 +266,9 @@ mod tests {
 
     use super::*;
     use bitcoin::PublicKey;
-    use hal_simplicity::{
+    use simplicity::{
         bitcoin::{NetworkKind, PrivateKey},
-        simplicity::elements::{
+        elements::{
             OutPoint, Transaction, TxIn, TxOut, Txid,
             pset::PartiallySignedTransaction as Pset,
             secp256k1_zkp::{Secp256k1, SecretKey},

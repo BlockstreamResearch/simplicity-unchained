@@ -10,6 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 hex-literal = "1.1.0"
-hal-simplicity = { workspace = true }
+simplicity-lang = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }

@@ -1,16 +1,15 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use hal_simplicity::bitcoin::KnownHrp;
-use hal_simplicity::bitcoin::taproot::TaprootSpendInfo;
-use hal_simplicity::simplicity::elements::{
+use simplicity::bitcoin::KnownHrp;
+use simplicity::bitcoin::taproot::TaprootSpendInfo;
+use simplicity::elements::{
     self,
     bitcoin::PublicKey,
-    hashes::Hash as ElementsHash,
     secp256k1_zkp::{Secp256k1, SecretKey, rand::rngs::OsRng},
 };
-use hal_simplicity::simplicity::hashes::{HashEngine, sha256};
-use hal_simplicity::simplicity::{ToXOnlyPubkey, bitcoin};
+use simplicity::hashes::{HashEngine, sha256};
+use simplicity::{ToXOnlyPubkey, bitcoin};
 
 use thiserror::Error;
 
@@ -29,10 +28,14 @@ pub enum UtilsError {
 
 const SIMPLICITY_TAG_PREFIX: &[u8] = b"Simplicity\x1fCommitment\x1f";
 
-const JETIV: sha256::Midstate = sha256::Midstate([
-    0x95, 0x32, 0xee, 0x28, 0xcd, 0xca, 0x69, 0xde, 0xc8, 0xa0, 0xa2, 0x18, 0xb7, 0x9b, 0xe3, 0x62,
-    0xf7, 0x40, 0xce, 0xaf, 0x64, 0x7f, 0x15, 0xb3, 0x8a, 0xed, 0x91, 0x68, 0x16, 0x3f, 0x92, 0x1b,
-]);
+const JETIV: sha256::Midstate = sha256::Midstate::new(
+    [
+        0x95, 0x32, 0xee, 0x28, 0xcd, 0xca, 0x69, 0xde, 0xc8, 0xa0, 0xa2, 0x18, 0xb7, 0x9b, 0xe3,
+        0x62, 0xf7, 0x40, 0xce, 0xaf, 0x64, 0x7f, 0x15, 0xb3, 0x8a, 0xed, 0x91, 0x68, 0x16, 0x3f,
+        0x92, 0x1b,
+    ],
+    0,
+);
 
 /// The standard NUMS internal key for Taproot outputs.
 ///
@@ -60,7 +63,7 @@ fn cmr(name: &str) -> [u8; 32] {
 
     let right_state = sha256::Hash::hash(&name).as_byte_array().to_owned();
 
-    let mut engine = sha256::HashEngine::from_midstate(JETIV, 0);
+    let mut engine = sha256::HashEngine::from_midstate(JETIV);
     engine.input(&right_state);
 
     right_state
@@ -244,7 +247,10 @@ pub fn generate_p2tr_address_elements(
     let spend_info = elements::taproot::TaprootBuilder::new()
         .add_leaf(1, multisig_leaf)
         .map_err(UtilsError::TaprootBuilderErrorElements)?
-        .add_hidden(1, user_leaf_hash)
+        .add_hidden(
+            1,
+            elements::taproot::TapNodeHash::from_byte_array(user_leaf_hash.to_byte_array()),
+        )
         .map_err(UtilsError::TaprootBuilderErrorElements)?
         .finalize(&secp, *UNSPENDABLE_KEY_P2TR)
         .map_err(|_| UtilsError::TaprootFinalizationError)?;
@@ -282,9 +288,7 @@ pub fn generate_p2tr_address_btc(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hal_simplicity::simplicity::elements::secp256k1_zkp::{
-        PublicKey as Secp256k1PublicKey, Secp256k1,
-    };
+    use simplicity::elements::secp256k1_zkp::{PublicKey as Secp256k1PublicKey, Secp256k1};
 
     #[test]
     fn test_generate_keypair() {

@@ -18,5 +18,5 @@ tracing = "0.1"
 tracing-subscriber = "0.3.0"
 validator = { version = "0.20.0", features = ["derive"] }
 
-hal-simplicity = { workspace = true }
+simplicity-lang = { workspace = true }
 core = { path = "../core" }

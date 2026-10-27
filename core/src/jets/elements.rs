@@ -1,26 +1,15 @@
-use std::collections::HashMap;
 use std::io::Write;
 use std::mem::MaybeUninit;
-use std::sync::Arc;
-use std::sync::LazyLock;
 
-use hal_simplicity::simplicity::Cmr;
-use hal_simplicity::simplicity::Cost;
-use hal_simplicity::simplicity::ffi::CFrameItem;
-use hal_simplicity::simplicity::jet::type_name::TypeName;
-use hal_simplicity::simplicity::jet::{Elements, Jet};
-use hal_simplicity::simplicity::{BitIter, BitWriter, decode};
+use simplicity::Cmr;
+use simplicity::Cost;
+use simplicity::ffi::CFrameItem;
+use simplicity::jet::type_name::TypeName;
+use simplicity::jet::{Elements, ElementsTxEnv, Jet, JetEnvironment};
+use simplicity::{BitIter, BitWriter, decode};
 
-use hal_simplicity::simplicity::elements::Transaction;
-use hal_simplicity::simplicity::jet::elements::ElementsEnv;
-
-use super::environments::UnchainedEnv;
-
-type CJetPtr = dyn Fn(&mut CFrameItem, CFrameItem, &UnchainedEnv<ElementsEnv<Arc<Transaction>>>) -> bool
-    + Send
-    + Sync;
-static C_JET_PTRS: LazyLock<HashMap<ElementsExtension, &'static CJetPtr>> =
-    LazyLock::new(|| build_c_jet_ptrs());
+use super::base::base_c_jet_ptr;
+use super::environments::ElementsUnchainedEnv;
 
 // Local version of decode_bits macro that accepts expressions instead of just paths
 macro_rules! decode_bits {
@@ -94,87 +83,47 @@ impl ElementsExtension {
     }
 }
 
-fn build_c_jet_ptrs() -> HashMap<ElementsExtension, &'static CJetPtr> {
-    ElementsExtension::ALL
-        .iter()
-        .map(|jet| {
-            let boxed: Box<CJetPtr> = match jet {
-                // hijacked elements jets
-                ElementsExtension::Elements(Elements::CheckLockDuration) => Box::new(
-                    move |dst: &mut CFrameItem,
-                          src: CFrameItem,
-                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
-                          -> bool {
-                        super::exec::check_lock_duration(dst, src, env)
-                    },
-                ),
-                ElementsExtension::Elements(Elements::CheckLockDistance) => Box::new(
-                    move |dst: &mut CFrameItem,
-                          src: CFrameItem,
-                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
-                          -> bool {
-                        super::exec::check_lock_distance(dst, src, env)
-                    },
-                ),
-                ElementsExtension::Elements(Elements::TxLockDuration) => Box::new(
-                    move |dst: &mut CFrameItem,
-                          src: CFrameItem,
-                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
-                          -> bool {
-                        super::exec::tx_lock_duration(dst, src, env)
-                    },
-                ),
-                ElementsExtension::Elements(Elements::TxLockDistance) => Box::new(
-                    move |dst: &mut CFrameItem,
-                          src: CFrameItem,
-                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
-                          -> bool {
-                        super::exec::tx_lock_distance(dst, src, env)
-                    },
-                ),
-                // rest of elements jets
-                ElementsExtension::Elements(inner_jet) => Box::new(
-                    move |dst: &mut CFrameItem,
-                          src: CFrameItem,
-                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
-                          -> bool {
-                        inner_jet.c_jet_ptr()(dst, src, env.env.c_tx_env())
-                    },
-                ),
-                // custom jets
-                ElementsExtension::GetOpcodeFromScript => Box::new(
-                    move |dst: &mut CFrameItem,
-                          src: CFrameItem,
-                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
-                          -> bool {
-                        super::exec::get_opcode_from_script(dst, src, env)
-                    },
-                ),
-                ElementsExtension::GetPubkeyFromScript => Box::new(
-                    move |dst: &mut CFrameItem,
-                          src: CFrameItem,
-                          env: &UnchainedEnv<ElementsEnv<Arc<Transaction>>>|
-                          -> bool {
-                        super::exec::get_pubkey_from_script(dst, src, env)
-                    },
-                ),
-            };
-            let leaked: &'static CJetPtr = Box::leak(boxed);
-            (*jet, leaked)
-        })
-        .collect()
+impl JetEnvironment for ElementsUnchainedEnv {
+    type Jet = ElementsExtension;
+    type CJetEnvironment = Self;
+
+    fn c_jet_env(&self) -> &Self::CJetEnvironment {
+        // For the time being, we are goint to use the initial environment for unchained jets,
+        // as we are going to implement them in rust.
+        self
+    }
+
+    fn c_jet_ptr(
+        jet: &Self::Jet,
+    ) -> fn(&mut CFrameItem, CFrameItem, &Self::CJetEnvironment) -> bool {
+        match jet {
+            // hijacked elements jets
+            ElementsExtension::Elements(Elements::BrokenDoNotUseCheckLockDuration) => {
+                super::exec::check_lock_duration
+            }
+            ElementsExtension::Elements(Elements::BrokenDoNotUseCheckLockDistance) => {
+                super::exec::check_lock_distance
+            }
+            ElementsExtension::Elements(Elements::BrokenDoNotUseTxLockDuration) => {
+                super::exec::tx_lock_duration
+            }
+            ElementsExtension::Elements(Elements::BrokenDoNotUseTxLockDistance) => {
+                super::exec::tx_lock_distance
+            }
+            // rest of elements jets
+            ElementsExtension::Elements(inner_jet) => base_c_jet_ptr(inner_jet),
+            // custom jets
+            ElementsExtension::GetOpcodeFromScript => {
+                super::exec::get_opcode_from_script::<ElementsTxEnv>
+            }
+            ElementsExtension::GetPubkeyFromScript => {
+                super::exec::get_pubkey_from_script::<ElementsTxEnv>
+            }
+        }
+    }
 }
 
 impl Jet for ElementsExtension {
-    type Environment = UnchainedEnv<ElementsEnv<Arc<Transaction>>>;
-    type CJetEnvironment = UnchainedEnv<ElementsEnv<Arc<Transaction>>>;
-
-    fn c_jet_env(env: &Self::Environment) -> &Self::CJetEnvironment {
-        // For the time being, we are goint to use the initial environment for unchained jets,
-        // as we are going to implement them in rust.
-        env
-    }
-
     fn cmr(&self) -> Cmr {
         if let ElementsExtension::Elements(inner_jet) = self {
             return inner_jet.cmr();
@@ -225,7 +174,7 @@ impl Jet for ElementsExtension {
         TypeName(name)
     }
 
-    fn encode<W: Write>(&self, w: &mut BitWriter<W>) -> std::io::Result<usize> {
+    fn encode(&self, w: &mut BitWriter<&mut dyn Write>) -> std::io::Result<usize> {
         if let ElementsExtension::Elements(inner_jet) = self {
             return inner_jet.encode(w);
         }
@@ -302,12 +251,6 @@ impl Jet for ElementsExtension {
         try_custom
     }
 
-    fn c_jet_ptr(&self) -> &dyn Fn(&mut CFrameItem, CFrameItem, &Self::CJetEnvironment) -> bool {
-        C_JET_PTRS
-            .get(self)
-            .expect("All enum variants should be initialized")
-    }
-
     fn cost(&self) -> Cost {
         if let ElementsExtension::Elements(inner_jet) = self {
             return inner_jet.cost();
@@ -319,6 +262,10 @@ impl Jet for ElementsExtension {
             ElementsExtension::GetPubkeyFromScript => Cost::from_milliweight(100),
             _ => unreachable!(),
         }
+    }
+
+    fn parse(s: &str) -> Result<Self, simplicity::Error> {
+        s.parse()
     }
 }
 
@@ -333,7 +280,7 @@ impl std::fmt::Display for ElementsExtension {
 }
 
 impl std::str::FromStr for ElementsExtension {
-    type Err = hal_simplicity::simplicity::Error;
+    type Err = simplicity::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {

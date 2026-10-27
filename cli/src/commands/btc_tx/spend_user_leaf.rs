@@ -9,10 +9,10 @@ use bitcoin::{
     sighash::{Prevouts, SighashCache},
     taproot::{LeafVersion, Signature as TapSig},
 };
-use hal_simplicity::bitcoin::base64::Engine;
-use hal_simplicity::bitcoin::hashes::Hash;
-use hal_simplicity::bitcoin::{self, base64};
 use serde_json::json;
+use simplicity::bitcoin::base64::Engine;
+use simplicity::bitcoin::hashes::Hash;
+use simplicity::bitcoin::{self, base64};
 use simplicity_unchained_core::utils::{UNSPENDABLE_KEY_P2TR, p2tr_multisig_leaf_btc};
 use std::str::FromStr;
 

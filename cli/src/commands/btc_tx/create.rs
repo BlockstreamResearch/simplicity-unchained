@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 
-use hal_simplicity::simplicity::bitcoin;
+use simplicity::bitcoin;
 
 use bitcoin::{
     Address, Amount, Network, OutPoint, Transaction, TxIn, TxOut, psbt::Psbt, script::ScriptBuf,

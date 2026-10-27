@@ -2,15 +2,15 @@ use std::str::FromStr;
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
-use hal_simplicity::bitcoin::key::{TapTweak, TweakedKeypair, UntweakedKeypair};
-use hal_simplicity::bitcoin::sighash::{Prevouts, ScriptPath};
-use hal_simplicity::bitcoin::taproot::{LeafVersion, TaprootBuilder};
-use hal_simplicity::bitcoin::{self, TapSighashType};
-use hal_simplicity::bitcoin::{TapNodeHash, Transaction, TxOut};
+use simplicity::bitcoin::key::{TapTweak, TweakedKeypair, UntweakedKeypair};
+use simplicity::bitcoin::sighash::{Prevouts, ScriptPath};
+use simplicity::bitcoin::taproot::{LeafVersion, TaprootBuilder};
+use simplicity::bitcoin::{self, TapSighashType};
+use simplicity::bitcoin::{TapNodeHash, Transaction, TxOut};
 
-use hal_simplicity::simplicity::bitcoin::{hashes::Hash, psbt::Psbt, sighash::SighashCache};
+use simplicity::bitcoin::{hashes::Hash, psbt::Psbt, sighash::SighashCache};
 
-use hal_simplicity::simplicity::elements::secp256k1_zkp::Message;
+use simplicity::elements::secp256k1_zkp::Message;
 
 use serde::{Deserialize, Serialize};
 
@@ -123,9 +123,9 @@ fn sign_psbt_internal(
         Some(str) => {
             let bytes = hex::decode(str)
                 .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
-            hal_simplicity::simplicity::elements::Script::from(bytes)
+            simplicity::elements::Script::from(bytes)
         }
-        None => hal_simplicity::simplicity::elements::Script::new(),
+        None => simplicity::elements::Script::new(),
     };
 
     let cmr = SimplicityRunner::execute_bitcoin(
@@ -252,16 +252,14 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use hal_simplicity::bitcoin::{self};
-    use hal_simplicity::hal_simplicity::Program;
-    use hal_simplicity::simplicity::bitcoin::{
+    use simplicity::bitcoin::{self};
+    use simplicity::bitcoin::{
         NetworkKind, OutPoint, PrivateKey, Transaction, TxIn, TxOut, Txid, psbt::Psbt,
         script::ScriptBuf, taproot::LeafVersion,
     };
-    use hal_simplicity::simplicity::elements::{
-        secp256k1_zkp::Secp256k1, secp256k1_zkp::SecretKey,
-    };
+    use simplicity::elements::{secp256k1_zkp::Secp256k1, secp256k1_zkp::SecretKey};
     use simplicity_unchained_core::BitcoinNetwork;
+    use simplicity_unchained_core::program::Program;
     use std::str::FromStr;
 
     use simplicity_unchained_core::utils::generate_p2tr_address_btc;
@@ -285,19 +283,19 @@ mod tests {
                 .unwrap();
 
         Transaction {
-            version: hal_simplicity::simplicity::bitcoin::transaction::Version::TWO,
-            lock_time: hal_simplicity::simplicity::bitcoin::absolute::LockTime::ZERO,
+            version: simplicity::bitcoin::transaction::Version::TWO,
+            lock_time: simplicity::bitcoin::absolute::LockTime::ZERO,
             input: vec![TxIn {
                 previous_output: OutPoint {
                     txid: prev_txid,
                     vout: 0,
                 },
                 script_sig: ScriptBuf::new(),
-                sequence: hal_simplicity::simplicity::bitcoin::Sequence::MAX,
+                sequence: simplicity::bitcoin::Sequence::MAX,
                 witness: Default::default(),
             }],
             output: vec![TxOut {
-                value: hal_simplicity::simplicity::bitcoin::Amount::from_sat(50_000),
+                value: simplicity::bitcoin::Amount::from_sat(50_000),
                 script_pubkey: ScriptBuf::new(),
             }],
         }
@@ -306,7 +304,7 @@ mod tests {
     fn create_test_psbt(tx: Transaction, script_pubkey: ScriptBuf) -> Psbt {
         let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
         psbt.inputs[0].witness_utxo = Some(TxOut {
-            value: hal_simplicity::simplicity::bitcoin::Amount::from_sat(100_000),
+            value: simplicity::bitcoin::Amount::from_sat(100_000),
             script_pubkey,
         });
         psbt

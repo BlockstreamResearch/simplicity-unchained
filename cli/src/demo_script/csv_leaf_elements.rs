@@ -1,19 +1,16 @@
 //! Timelocked user script for demo purposes
 use anyhow::{Context, Result, anyhow};
-use hal_simplicity::{
+use serde_json::json;
+use simplicity::{
+    ToXOnlyPubkey,
     bitcoin::PublicKey,
-    simplicity::{
-        ToXOnlyPubkey,
-        elements::{
-            self,
-            encode::{deserialize, serialize},
-            hashes::Hash,
-            pset::{self, PartiallySignedTransaction},
-            taproot::{LeafVersion, TapLeafHash},
-        },
+    elements::{
+        self,
+        encode::{deserialize, serialize},
+        pset::{self, PartiallySignedTransaction},
+        taproot::{LeafVersion, TapLeafHash},
     },
 };
-use serde_json::json;
 
 pub fn build_csv_script(user_pubkey_hex: &str, timelock: u16) -> Result<()> {
     let user_pubkey_bytes =
@@ -78,7 +75,8 @@ fn finalize_internal(tx: &mut elements::Transaction, i: usize, input: &pset::Inp
         sig.to_vec(),
         leaf_script.to_bytes(),
         control_block.serialize(),
-    ];
+    ]
+    .into();
 
     Ok(())
 }

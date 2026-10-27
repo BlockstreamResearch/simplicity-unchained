@@ -1,17 +1,16 @@
 use anyhow::{Context, Result, anyhow};
-use hal_simplicity::{
+use serde_json::json;
+use simplicity::{
     bitcoin::{self, key::UntweakedKeypair},
-    simplicity::elements::{
+    elements::{
         self, SchnorrSig,
         encode::{deserialize, serialize},
-        hashes::Hash,
         pset::PartiallySignedTransaction,
         secp256k1_zkp::{Message, Secp256k1, SecretKey},
         sighash::{Prevouts, SchnorrSighashType, SighashCache},
         taproot::{LeafVersion, TapLeafHash, TaprootBuilder},
     },
 };
-use serde_json::json;
 use simplicity_unchained_core::{
     ElementsNetwork,
     utils::{UNSPENDABLE_KEY_P2TR, p2tr_multisig_leaf_elements},

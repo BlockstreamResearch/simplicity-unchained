@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use hal_simplicity::bitcoin::hashes::Hash;
-use hal_simplicity::{bitcoin::TapNodeHash, simplicity::elements::AddressParams};
 use serde_json::json;
+use simplicity::bitcoin::hashes::Hash;
+use simplicity::{bitcoin::TapNodeHash, elements::AddressParams};
 
-use hal_simplicity::simplicity::elements::bitcoin::PublicKey;
-use hal_simplicity::simplicity::{bitcoin, elements};
+use simplicity::elements::bitcoin::PublicKey;
+use simplicity::{bitcoin, elements};
 
 use simplicity_unchained_core::utils::{generate_p2tr_address_btc, generate_p2tr_address_elements};
 
@@ -29,7 +29,9 @@ pub fn execute(
         let output = execute_over_elements(
             &pk1,
             &pk2,
-            elements::hashes::sha256::Hash::from_slice(&user_leaf_hash_bytes)?,
+            elements::hashes::sha256::Hash::from_byte_array(
+                user_leaf_hash_bytes.as_slice().try_into()?,
+            ),
             network,
         )?;
         println!("{}", serde_json::to_string_pretty(&output)?);
