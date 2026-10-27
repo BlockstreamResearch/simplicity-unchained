@@ -4,6 +4,7 @@ members = [
     "cli",
     "core",
     "jet_plugin_abi",
+    "plugin_tests/script_jets",
     "service",
 ]
 
