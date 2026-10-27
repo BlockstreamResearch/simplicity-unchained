@@ -71,8 +71,3 @@ impl From<BitcoinNetwork> for NetworkKind {
         }
     }
 }
-
-#[doc(hidden)]
-pub mod __simplicity {
-    pub use hal_simplicity::simplicity;
-}

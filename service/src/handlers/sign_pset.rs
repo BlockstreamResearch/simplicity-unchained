@@ -84,9 +84,8 @@ pub async fn sign_pset(
     match sign_pset_internal(&state, request) {
         Ok(response) => {
             log::info!(
-                "[200] Sign PSET successful: Tweaked Public Key {}, custom jets used: {}",
-                response.public_key_hex,
-                state.has_custom_jets
+                "[200] Sign PSET successful: Tweaked Public Key {}",
+                response.public_key_hex
             );
 
             (StatusCode::OK, Json(response)).into_response()
@@ -283,7 +282,6 @@ mod tests {
             secp: Arc::new(Secp256k1::new()),
             elements_network: ElementsNetwork::LiquidTestnet,
             bitcoin_network: BitcoinNetwork::Testnet,
-            has_custom_jets: false,
         }
     }
 

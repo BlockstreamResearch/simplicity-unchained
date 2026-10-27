@@ -20,4 +20,3 @@ validator = { version = "0.20.0", features = ["derive"] }
 
 hal-simplicity = { workspace = true }
 core = { path = "../core" }
-dlopen2 = "0.8.2"

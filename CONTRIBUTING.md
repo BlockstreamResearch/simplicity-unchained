@@ -6,11 +6,9 @@ Contributions of all kinds are welcome — bug reports, documentation improvemen
 
 The workspace is organised into focused crates. Keep changes scoped to the appropriate crate and discuss cross-crate changes in an issue first.
 
-- [`core`](core/README.md): Simplicity execution engine, Bitcoin/Elements environments, and the dynamic jet loading API.
-- [`jet_plugins`](jet_plugins/README.md): Procedural macro that derives the `Jet` trait and C FFI for custom jet plugins.
+- [`core`](core/README.md): Simplicity execution engine and Bitcoin/Elements environments.
 - [`service`](service/README.md): Axum HTTP service exposing the sign/PSBT, sign/PSET, and key-tweak endpoints.
 - [`cli`](cli/README.md): `clap`-based CLI for interacting with the service and accessing ecosystem utilities.
-- `plugin_tests/`: Example and integration-test jet plugins for Bitcoin, Elements, and opcode pubkey variants.
 
 ## Issues
 
@@ -32,43 +30,6 @@ If this is just a bug report or a feature request, please open an issue first so
 - Keep the public API surface minimal. Only `pub` what downstream crates genuinely need, and add `///` doc comments to all new public items.
 - Adding a new dependency requires justification. Prefer `[workspace.dependencies]` entries and avoid floating version requirements.
 - Add unit tests under a `#[cfg(test)]` module in the same file.
-
-## Adding Custom Jets
-
-Custom jets are the primary extension point. To add a new jet plugin:
-
-1. Create a new crate that depends on `jet_plugins` and `simplicity_unchained_core`, declare it as a `cdylib`:
-
-   ```toml
-   # Cargo.toml
-   [lib]
-   crate-type = ["cdylib"]
-   ```
-
-2. Define your jet functions matching the expected signature:
-
-   ```rust
-   fn my_jet(_dst: &mut CFrameItem, _src: CFrameItem, _env: &BitcoinUnchainedEnv) -> bool {
-       // return true on success
-       todo!()
-   }
-   ```
-
-3. Register them with the `register_jets!` macro:
-
-   ```rust
-   use jet_plugins::register_jets;
-   use simplicity_unchained_core::jets::environments::BitcoinUnchainedEnv;
-   use hal_simplicity::simplicity::ffi::CFrameItem;
-
-   register_jets!(
-       hal_simplicity::simplicity::jet::Core,   // base jet set
-       BitcoinUnchainedEnv,                     // environment type
-       "my_jet_name" => my_jet, b"h", b"h",     // (name, fn, source_type, target_type)
-   );
-   ```
-
-4. Pass the compiled `.so`/`.dylib` path to the core runner via the dynamic loading API. See `core/src/jets/jet_dyn.rs` and `cli/assets/custom_jet_dlls/` for reference.
 
 ## Running the Service Locally
 

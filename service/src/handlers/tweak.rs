@@ -164,7 +164,6 @@ mod tests {
             secp: Arc::new(Secp256k1::new()),
             elements_network: ElementsNetwork::LiquidTestnet,
             bitcoin_network: BitcoinNetwork::Testnet,
-            has_custom_jets: false,
         }
     }
 

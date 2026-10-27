@@ -14,10 +14,8 @@
 ## Affected crates
 
 - [ ] `core`
-- [ ] `jet_plugins`
 - [ ] `service`
 - [ ] `cli`
-- [ ] `plugin_tests`
 - [ ] CI / tooling
 
 ## Checklist
