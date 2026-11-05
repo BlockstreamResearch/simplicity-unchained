@@ -41,10 +41,9 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AddressCommands {
-    /// Generate a 2-of-2 multisig address from two public keys.
-    /// Use --type to select p2sh (legacy) or p2wsh (segwit v0). Defaults to p2wsh.
+    /// Generate a P2TR 2-of-2 multisig address from two public keys.
     Multisig {
-        /// First public key in hex format
+        /// Script-bound tweaked cosigner public key from the service /tweak endpoint, in hex
         #[arg(short = '1', long)]
         pubkey1: String,
 
@@ -70,6 +69,25 @@ enum KeypairCommands {
 
 #[derive(Subcommand)]
 enum BtcTxCommands {
+    /// Compute the per-spend digest for a tx_approval_hash policy (not a Taproot sighash)
+    ApprovalHash {
+        /// PSBT in hex, with witness_utxo populated for every input
+        #[arg(long)]
+        psbt: String,
+        /// Selected input
+        #[arg(long)]
+        input_index: usize,
+        /// Encoded Bitcoin Simplicity program (hex or base64)
+        #[arg(long)]
+        program: String,
+        /// Exact script data committed at address generation
+        #[arg(long)]
+        redeem_script_hex: Option<String>,
+        /// Must match the service's bitcoin_network (bitcoin, testnet, testnet4)
+        #[arg(long)]
+        network: String,
+    },
+
     /// Create a PSBT (PartiallySignedTransaction) from UTXOs
     Create {
         /// Transaction input in format: txid:vout
@@ -84,7 +102,7 @@ enum BtcTxCommands {
         #[arg(short, long, default_value = "bitcoin")]
         network: String,
 
-        /// Relative timelock in blocks for recovery path
+        /// Relative locktime in blocks for all inputs; CSV recovery requires >= the leaf delay
         #[arg(long)]
         sequence: Option<u16>,
     },
@@ -184,7 +202,7 @@ enum TxCommands {
         #[arg(short, long, default_value = "elements")]
         network: String,
 
-        /// Relative timelock in blocks for recovery path
+        /// Relative locktime in blocks for all inputs; CSV recovery requires >= the leaf delay
         #[arg(long)]
         sequence: Option<u16>,
     },
@@ -220,6 +238,10 @@ enum TxCommands {
         /// PSET in hex format
         #[arg(short, long)]
         pset: String,
+
+        /// Network used for signature verification (liquid, liquid_testnet)
+        #[arg(short, long, default_value = "liquid_testnet")]
+        network: String,
     },
 
     /// Spend the user leaf (Leaf 1) of a P2TR output independently
@@ -324,8 +346,8 @@ fn main() -> Result<()> {
                 )?;
             }
 
-            TxCommands::Finalize { pset } => {
-                commands::tx::finalize::execute(&pset)?;
+            TxCommands::Finalize { pset, network } => {
+                commands::tx::finalize::execute(&pset, &network)?;
             }
             TxCommands::SpendUserLeaf {
                 psbt: pset,
@@ -358,6 +380,22 @@ fn main() -> Result<()> {
         },
 
         Commands::BtcTx { command } => match command {
+            BtcTxCommands::ApprovalHash {
+                psbt,
+                input_index,
+                program,
+                redeem_script_hex,
+                network,
+            } => {
+                commands::btc_tx::approval_hash::execute(
+                    &psbt,
+                    input_index,
+                    &program,
+                    redeem_script_hex.as_deref(),
+                    &network,
+                )?;
+            }
+
             BtcTxCommands::Create {
                 inputs,
                 outputs,

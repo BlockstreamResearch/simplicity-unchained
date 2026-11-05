@@ -13,8 +13,11 @@ use validator::Validate;
 use simplicity_unchained_core::jets::bitcoin::CoreExtension;
 use simplicity_unchained_core::jets::elements::ElementsExtension;
 use simplicity_unchained_core::program::Program;
+use simplicity_unchained_core::utils::signing_commitment;
 
 use crate::handlers::{ErrorResponse, SignerState};
+use crate::validation;
+use crate::work::WorkPermit;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -28,6 +31,8 @@ pub struct TweakRequest {
     #[validate(length(min = 1))]
     pub program: String,
     pub jet_env: Option<JetEnvKind>,
+    #[validate(custom(function = "validation::validate_redeem_script"))]
+    pub redeem_script_hex: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,22 +43,19 @@ pub struct TweakResponse {
 
 pub async fn get_tweaked_key(
     State(state): State<SignerState>,
+    permit: WorkPermit,
     Json(request): Json<TweakRequest>,
 ) -> impl IntoResponse {
-    // Validate request using validator
-    if let Err(errors) = request.validate() {
-        let error_msg = format!("Validation failed: {}", errors);
-        log::error!("[400] Tweak validation error: {}", error_msg);
-
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: error_msg }),
-        )
-            .into_response();
-    }
-
-    match get_tweaked_key_internal(&state, request) {
-        Ok(response) => {
+    let result = permit
+        .run(move || {
+            request
+                .validate()
+                .map_err(|e| format!("Validation failed: {}", e))?;
+            get_tweaked_key_internal(&state, request)
+        })
+        .await;
+    match result {
+        Ok(Ok(response)) => {
             log::info!(
                 "[200] Tweak successful: CMR {}, Tweaked Public Key {}",
                 response.cmr_hex,
@@ -62,11 +64,12 @@ pub async fn get_tweaked_key(
 
             (StatusCode::OK, Json(response)).into_response()
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             log::error!("[400] Tweak error: {}", e);
 
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
+        Err(e) => e.into_response(),
     }
 }
 
@@ -92,7 +95,7 @@ fn get_tweaked_key_bitcoin(
         program.commit_prog().cmr()
     };
 
-    // Create untweaked keypair and tweak it with the CMR
+    let redeem_script = validation::decode_redeem_script(request.redeem_script_hex.as_deref())?;
     let untweaked_keypair =
         bitcoin::key::UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
 
@@ -100,7 +103,7 @@ fn get_tweaked_key_bitcoin(
         untweaked_keypair,
         &*state.secp,
         Some(bitcoin::taproot::TapNodeHash::from_byte_array(
-            cmr.to_byte_array(),
+            signing_commitment(cmr, redeem_script.as_bytes()),
         )),
     );
 
@@ -128,14 +131,14 @@ fn get_tweaked_key_elements(
         program.commit_prog().cmr()
     };
 
-    // Create untweaked keypair and tweak it with the CMR
+    let redeem_script = validation::decode_redeem_script(request.redeem_script_hex.as_deref())?;
     let untweaked_keypair =
         elements::schnorr::UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
 
     let tweaked_keypair = untweaked_keypair.tap_tweak(
         &*state.secp,
         Some(elements::taproot::TapNodeHash::from_byte_array(
-            cmr.to_byte_array(),
+            signing_commitment(cmr, redeem_script.as_bytes()),
         )),
     );
 
@@ -166,6 +169,7 @@ mod tests {
             secp: Arc::new(Secp256k1::new()),
             elements_network: ElementsNetwork::LiquidTestnet,
             bitcoin_network: BitcoinNetwork::Testnet,
+            work_slots: Arc::new(tokio::sync::Semaphore::new(crate::work::MAX_BLOCKING_JOBS)),
         }
     }
 
@@ -176,6 +180,7 @@ mod tests {
         let request = TweakRequest {
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             jet_env: None,
+            redeem_script_hex: None,
         };
 
         let result = get_tweaked_key_internal(&state, request);
@@ -199,6 +204,7 @@ mod tests {
         let request = TweakRequest {
             program: "invalid_program".to_string(),
             jet_env: None,
+            redeem_script_hex: None,
         };
 
         let result = get_tweaked_key_internal(&state, request);
@@ -212,6 +218,7 @@ mod tests {
         let valid_request = TweakRequest {
             program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
             jet_env: None,
+            redeem_script_hex: None,
         };
         assert!(valid_request.validate().is_ok());
 
@@ -219,6 +226,7 @@ mod tests {
         let invalid_request = TweakRequest {
             program: "".to_string(),
             jet_env: None,
+            redeem_script_hex: None,
         };
         assert!(invalid_request.validate().is_err());
     }
@@ -234,6 +242,7 @@ mod tests {
         let request = TweakRequest {
             program: program.clone(),
             jet_env: None,
+            redeem_script_hex: None,
         };
 
         let result = get_tweaked_key_internal(&state, request).unwrap();
@@ -245,5 +254,40 @@ mod tests {
         // Decode and verify the public key
         let pubkey_bytes = hex::decode(&result.tweaked_public_key_hex).unwrap();
         assert_eq!(pubkey_bytes.len(), 33); // Compressed public key
+    }
+
+    #[test]
+    fn test_tweak_binds_script_in_both_environments() {
+        let state = create_test_signer_state();
+        for bitcoin in [false, true] {
+            let request = |script: Option<&str>| TweakRequest {
+                program: "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA".to_string(),
+                jet_env: Some(if bitcoin {
+                    JetEnvKind::Bitcoin
+                } else {
+                    JetEnvKind::Elements
+                }),
+                redeem_script_hex: script.map(str::to_string),
+            };
+            let empty = get_tweaked_key_internal(&state, request(None)).unwrap();
+            let explicit_empty = get_tweaked_key_internal(&state, request(Some(""))).unwrap();
+            assert_eq!(
+                empty.tweaked_public_key_hex,
+                explicit_empty.tweaked_public_key_hex
+            );
+            let first = get_tweaked_key_internal(&state, request(Some("52"))).unwrap();
+            let second = get_tweaked_key_internal(&state, request(Some("51"))).unwrap();
+            assert_eq!(first.cmr_hex, second.cmr_hex);
+            assert_eq!(first.cmr_hex, empty.cmr_hex);
+            assert_ne!(first.tweaked_public_key_hex, second.tweaked_public_key_hex);
+            assert_ne!(first.tweaked_public_key_hex, empty.tweaked_public_key_hex);
+            assert!(request(Some("21")).validate().is_err());
+            assert!(request(Some("zz")).validate().is_err());
+            assert!(
+                get_tweaked_key_internal(&state, request(Some("zz")))
+                    .unwrap_err()
+                    .contains("Failed to decode redeem script hex")
+            );
+        }
     }
 }

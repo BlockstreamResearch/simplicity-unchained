@@ -5,11 +5,11 @@ use simplicity::Cmr;
 use simplicity::Cost;
 use simplicity::ffi::CFrameItem;
 use simplicity::jet::type_name::TypeName;
-use simplicity::jet::{Core, CoreEnv, Jet, JetEnvironment};
+use simplicity::jet::{Core, Jet, JetEnvironment};
 use simplicity::{BitIter, BitWriter, decode};
 
 use super::base::base_c_jet_ptr;
-use super::environments::BitcoinUnchainedEnv;
+use super::environments::{BitcoinTxEnv, BitcoinUnchainedEnv};
 
 // Local version of decode_bits macro that accepts expressions instead of just paths
 macro_rules! decode_bits {
@@ -33,12 +33,13 @@ pub enum CoreExtension {
     Core(Core),
     GetOpcodeFromScript,
     GetPubkeyFromScript,
+    TxApprovalHash,
 }
 
 impl CoreExtension {
     pub const ALL: [Self; Self::ALL_JETS_NUM] = Self::build_all_variants();
 
-    const ALL_JETS_NUM: usize = Core::ALL.len() + 2;
+    const ALL_JETS_NUM: usize = Core::ALL.len() + 3;
 
     const fn build_all_variants() -> [Self; Self::ALL_JETS_NUM] {
         struct AllVariantsBuilder {
@@ -78,6 +79,7 @@ impl CoreExtension {
 
         builder.push(CoreExtension::GetOpcodeFromScript);
         builder.push(CoreExtension::GetPubkeyFromScript);
+        builder.push(CoreExtension::TxApprovalHash);
 
         builder.finalize()
     }
@@ -100,8 +102,13 @@ impl JetEnvironment for BitcoinUnchainedEnv {
             // rest of elements jets
             CoreExtension::Core(inner_jet) => base_c_jet_ptr(inner_jet),
             // custom jets
-            CoreExtension::GetOpcodeFromScript => super::exec::get_opcode_from_script::<CoreEnv>,
-            CoreExtension::GetPubkeyFromScript => super::exec::get_pubkey_from_script::<CoreEnv>,
+            CoreExtension::GetOpcodeFromScript => {
+                super::exec::get_opcode_from_script::<BitcoinTxEnv>
+            }
+            CoreExtension::GetPubkeyFromScript => {
+                super::exec::get_pubkey_from_script::<BitcoinTxEnv>
+            }
+            CoreExtension::TxApprovalHash => super::exec::bitcoin_tx_approval_hash,
         }
     }
 }
@@ -123,6 +130,9 @@ impl Jet for CoreExtension {
                 0xd2, 0x52, 0x0e, 0xcc, 0x02, 0x09, 0x00, 0x67, 0xc8, 0xfc, 0xca, 0xbb, 0x4d, 0x72,
                 0xa6, 0x55, 0xcd, 0xcb,
             ],
+            CoreExtension::TxApprovalHash => hex_literal::hex!(
+                "f0ed96ee8fbf1a69beb20deb3a7a9b748bdc18da284d15438debc7d4faeb9962"
+            ),
             _ => unreachable!(),
         };
 
@@ -137,6 +147,7 @@ impl Jet for CoreExtension {
         let name = match self {
             CoreExtension::GetOpcodeFromScript => b"c",
             CoreExtension::GetPubkeyFromScript => b"c",
+            CoreExtension::TxApprovalHash => b"1",
             _ => unreachable!(),
         };
 
@@ -151,6 +162,7 @@ impl Jet for CoreExtension {
         let name = match self {
             CoreExtension::GetOpcodeFromScript => b"c",
             CoreExtension::GetPubkeyFromScript => b"h",
+            CoreExtension::TxApprovalHash => b"h",
             _ => unreachable!(),
         };
 
@@ -165,6 +177,7 @@ impl Jet for CoreExtension {
         let (n, len) = match self {
             CoreExtension::GetOpcodeFromScript => (62, 6),
             CoreExtension::GetPubkeyFromScript => (126, 7),
+            CoreExtension::TxApprovalHash => (127, 7),
             _ => unreachable!(),
         };
 
@@ -213,7 +226,7 @@ impl Jet for CoreExtension {
                                 0 => {CoreExtension::GetOpcodeFromScript},
                                 1 => {
                                     0 => {CoreExtension::GetPubkeyFromScript},
-                                    1 => {}
+                                    1 => {CoreExtension::TxApprovalHash}
                                 }
                             }
                         }
@@ -243,6 +256,7 @@ impl Jet for CoreExtension {
         match self {
             CoreExtension::GetOpcodeFromScript => Cost::from_milliweight(100),
             CoreExtension::GetPubkeyFromScript => Cost::from_milliweight(100),
+            CoreExtension::TxApprovalHash => Cost::from_milliweight(356),
             _ => unreachable!(),
         }
     }
@@ -258,6 +272,7 @@ impl std::fmt::Display for CoreExtension {
             CoreExtension::Core(inner_jet) => f.write_str(&inner_jet.to_string()),
             CoreExtension::GetOpcodeFromScript => f.write_str("get_opcode_from_script"),
             CoreExtension::GetPubkeyFromScript => f.write_str("get_pubkey_from_script"),
+            CoreExtension::TxApprovalHash => f.write_str("tx_approval_hash"),
         }
     }
 }
@@ -269,6 +284,7 @@ impl std::str::FromStr for CoreExtension {
         match s {
             "get_opcode_from_script" => Ok(CoreExtension::GetOpcodeFromScript),
             "get_pubkey_from_script" => Ok(CoreExtension::GetPubkeyFromScript),
+            "tx_approval_hash" => Ok(CoreExtension::TxApprovalHash),
             _ => {
                 let inner_jet = s.parse::<Core>()?;
                 Ok(CoreExtension::Core(inner_jet))

@@ -5,16 +5,16 @@ use std::path::PathBuf;
 pub enum Error {
     #[error("failed to read config file: {0}")]
     Io(std::io::Error),
-    #[error("failed to parse config file: {0}")]
+    #[error("failed to parse config file; check TOML syntax and required service fields")]
     Toml(toml::de::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct Config {
     pub service: ServiceConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ServiceConfig {
     pub port: u16,
     pub private_key: String,

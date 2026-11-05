@@ -6,7 +6,21 @@ use simplicity::{
 
 use crate::jets::environments::ElementsUnchainedEnv;
 
-use super::environments::UnchainedEnv;
+use super::environments::{BitcoinUnchainedEnv, UnchainedEnv};
+
+/// ONE |- 2^256
+///
+/// Returns the versioned Bitcoin transaction approval digest computed by the runner.
+pub fn bitcoin_tx_approval_hash(
+    dst: &mut CFrameItem,
+    _src: CFrameItem,
+    env: &BitcoinUnchainedEnv,
+) -> bool {
+    for byte in env.env.approval_hash {
+        write_bits(dst, byte.into(), 8);
+    }
+    true
+}
 
 /// Reads a big-endian `n`-bit value from a C read frame.
 fn read_bits(src: &mut CFrameItem, n: u32) -> u64 {

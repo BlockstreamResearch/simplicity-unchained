@@ -10,6 +10,8 @@ use simplicity::{
 };
 use std::str::FromStr;
 
+use super::csv::validate_sequence;
+
 pub fn build_csv_script(user_pubkey_hex: &str, timelock: u16) -> Result<()> {
     let user_pubkey =
         PublicKey::from_str(user_pubkey_hex).context("Failed to parse user pubkey")?;
@@ -60,6 +62,13 @@ fn finalize_internal(tx: &mut Transaction, i: usize, input: &psbt::Input) -> Res
         .next()
         .map(|(cb, s)| (cb.clone(), s.clone()))
         .ok_or_else(|| anyhow!("Input {} missing tap_scripts", i))?;
+
+    validate_sequence(
+        leaf_script.as_bytes(),
+        i64::from(tx.version.0),
+        tx.input[i].sequence.0,
+        i,
+    )?;
 
     let leaf_hash = TapLeafHash::from_script(&leaf_script, LeafVersion::TapScript);
 

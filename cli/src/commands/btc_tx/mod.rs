@@ -1,3 +1,4 @@
+pub mod approval_hash;
 pub mod create;
 pub mod finalize;
 pub mod sign;

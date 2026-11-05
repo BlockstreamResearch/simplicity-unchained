@@ -9,7 +9,7 @@ use simplicity::elements::{
     secp256k1_zkp::{Secp256k1, SecretKey, rand::rngs::OsRng},
 };
 use simplicity::hashes::{HashEngine, sha256};
-use simplicity::{ToXOnlyPubkey, bitcoin};
+use simplicity::{Cmr, ToXOnlyPubkey, bitcoin};
 
 use thiserror::Error;
 
@@ -27,6 +27,20 @@ pub enum UtilsError {
 }
 
 const SIMPLICITY_TAG_PREFIX: &[u8] = b"Simplicity\x1fCommitment\x1f";
+
+/// Version 1 key commitment: tagged SHA256 of `CMR || SHA256(redeem_script)`.
+///
+/// The script bytes must be identical at address generation and execution time.
+/// Empty scripts are committed too; this never falls back to a CMR-only tweak.
+pub fn signing_commitment(cmr: Cmr, redeem_script: &[u8]) -> [u8; 32] {
+    let tag = sha256::Hash::hash(b"SimplicityUnchained/SigningCommitment/v1");
+    let mut engine = sha256::Hash::engine();
+    engine.input(tag.as_byte_array());
+    engine.input(tag.as_byte_array());
+    engine.input(&cmr.to_byte_array());
+    engine.input(sha256::Hash::hash(redeem_script).as_byte_array());
+    sha256::Hash::from_engine(engine).to_byte_array()
+}
 
 const JETIV: sha256::Midstate = sha256::Midstate::new(
     [
@@ -93,6 +107,8 @@ pub enum SigExtractionError {
     InvalidPubKey(usize, usize),
     #[error("Input {0}: expected 32-byte xonly pk at position {1}")]
     ExpectedPubkey(usize, usize),
+    #[error("Input {0}: unexpected opcode at position {1}")]
+    UnexpectedOpcode(usize, usize),
     #[error("Input {0}: recovery key does not match multisig user key")]
     RecoveryKeyMismatch(usize),
 }
@@ -155,7 +171,7 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_btc(
     input_index: usize,
 ) -> Result<[bitcoin::XOnlyPublicKey; 2], SigExtractionError> {
     let instructions = script
-        .instructions()
+        .instructions_minimal()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| SigExtractionError::ParseFail(input_index))?;
 
@@ -166,6 +182,17 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_btc(
             6,
             instructions.len(),
         ));
+    }
+
+    for (position, opcode) in [
+        (1, bitcoin::opcodes::all::OP_CHECKSIG),
+        (3, bitcoin::opcodes::all::OP_CHECKSIGADD),
+        (4, bitcoin::opcodes::all::OP_PUSHNUM_2),
+        (5, bitcoin::opcodes::all::OP_EQUAL),
+    ] {
+        if instructions[position] != bitcoin::script::Instruction::Op(opcode) {
+            return Err(SigExtractionError::UnexpectedOpcode(input_index, position));
+        }
     }
 
     let pk1 = match &instructions[0] {
@@ -200,7 +227,7 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_elements(
     input_index: usize,
 ) -> Result<[elements::secp256k1_zkp::XOnlyPublicKey; 2], SigExtractionError> {
     let instructions = script
-        .instructions()
+        .instructions_minimal()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| SigExtractionError::ParseFail(input_index))?;
 
@@ -211,6 +238,17 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_elements(
             6,
             instructions.len(),
         ));
+    }
+
+    for (position, opcode) in [
+        (1, elements::opcodes::all::OP_CHECKSIG),
+        (3, elements::opcodes::all::OP_CHECKSIGADD),
+        (4, elements::opcodes::all::OP_PUSHNUM_2),
+        (5, elements::opcodes::all::OP_EQUAL),
+    ] {
+        if instructions[position] != elements::script::Instruction::Op(opcode) {
+            return Err(SigExtractionError::UnexpectedOpcode(input_index, position));
+        }
     }
 
     let pk1 = match &instructions[0] {
@@ -289,6 +327,94 @@ pub fn generate_p2tr_address_btc(
 mod tests {
     use super::*;
     use simplicity::elements::secp256k1_zkp::{PublicKey as Secp256k1PublicKey, Secp256k1};
+
+    #[test]
+    fn multisig_leaf_parsers_require_every_opcode_and_canonical_pushes() {
+        let (_, cosigner) = generate_keypair();
+        let (_, user) = generate_keypair();
+        let btc = p2tr_multisig_leaf_btc(&cosigner, &user);
+        let elements = p2tr_multisig_leaf_elements(&cosigner, &user);
+        assert_eq!(
+            extract_pubkeys_from_p2tr_multisig_leaf_btc(&btc, 0).unwrap(),
+            [cosigner.to_x_only_pubkey(), user.to_x_only_pubkey()],
+        );
+        assert_eq!(
+            extract_pubkeys_from_p2tr_multisig_leaf_elements(&elements, 0).unwrap(),
+            [cosigner.to_x_only_pubkey(), user.to_x_only_pubkey()],
+        );
+        for original in [btc.as_bytes(), elements.as_bytes()] {
+            for position in [33, 67, 68, 69] {
+                let mut changed = original.to_vec();
+                changed[position] = 0x61; // OP_NOP preserves instruction count.
+                assert!(matches!(
+                    extract_pubkeys_from_p2tr_multisig_leaf_btc(
+                        &bitcoin::ScriptBuf::from_bytes(changed.clone()),
+                        3
+                    ),
+                    Err(SigExtractionError::UnexpectedOpcode(3, _)),
+                ));
+                assert!(matches!(
+                    extract_pubkeys_from_p2tr_multisig_leaf_elements(
+                        &elements::Script::from(changed),
+                        3
+                    ),
+                    Err(SigExtractionError::UnexpectedOpcode(3, _)),
+                ));
+            }
+            let mut nonminimal = vec![0x4c, 0x20];
+            nonminimal.extend_from_slice(&original[1..]);
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_btc(
+                    &bitcoin::ScriptBuf::from_bytes(nonminimal.clone()),
+                    0,
+                )
+                .is_err()
+            );
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_elements(
+                    &elements::Script::from(nonminimal),
+                    0,
+                )
+                .is_err()
+            );
+            let mut invalid_key = original.to_vec();
+            invalid_key[1..33].fill(0xff);
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_btc(
+                    &bitcoin::ScriptBuf::from_bytes(invalid_key.clone()),
+                    0,
+                )
+                .is_err()
+            );
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_elements(
+                    &elements::Script::from(invalid_key),
+                    0,
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn test_signing_commitment() {
+        let cmr = Cmr::from_byte_array([1; 32]);
+        let mut script = vec![0x52, 0x21, 0x02];
+        script.extend_from_slice(&[2; 32]);
+        let commitment = signing_commitment(cmr, &script);
+        assert_eq!(
+            hex::encode(commitment),
+            "d1eeca3675cdeeb910edb4644dc13ffba0b2d8f1ee9c10133ea724f089994f57"
+        );
+        assert_ne!(
+            commitment,
+            signing_commitment(Cmr::from_byte_array([2; 32]), &script)
+        );
+        script[2] = 0x03;
+        assert_ne!(commitment, signing_commitment(cmr, &script));
+        assert_ne!(signing_commitment(cmr, &[]), cmr.to_byte_array());
+        assert_ne!(signing_commitment(cmr, &[]), signing_commitment(cmr, &[0]));
+    }
 
     #[test]
     fn test_generate_keypair() {

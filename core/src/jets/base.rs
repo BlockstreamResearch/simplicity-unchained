@@ -38,6 +38,12 @@ impl<E> AsBaseEnv<E> for UnchainedEnv<E> {
     }
 }
 
+impl AsBaseEnv<CoreEnv> for BitcoinUnchainedEnv {
+    fn base_env(&self) -> &CoreEnv {
+        &self.env.core_env
+    }
+}
+
 impl BaseJet for Core {
     type Env = CoreEnv;
     const ALL: &'static [Self] = &Core::ALL;
@@ -65,6 +71,7 @@ impl BaseJet for CoreExtension {
             CoreExtension::Core(inner) => inner.index(),
             CoreExtension::GetOpcodeFromScript => Core::ALL.len(),
             CoreExtension::GetPubkeyFromScript => Core::ALL.len() + 1,
+            CoreExtension::TxApprovalHash => Core::ALL.len() + 2,
         }
     }
 }

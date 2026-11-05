@@ -1,4 +1,5 @@
 fn main() {
+    // Commit to the intended script via /tweak before funding, and use the same script when signing.
     // Test that the opcode extraction works correctly
     // 
     // You can read any opcode from a script and build an additional branching logic on it.

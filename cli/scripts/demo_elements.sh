@@ -143,7 +143,7 @@ echo "User signature added"
 echo
 
 echo "==== Step 8: Finalize ===="
-FINALIZE_DATA=$(cargo run --quiet -- tx finalize --pset "$PSET_SIGNED2")
+FINALIZE_DATA=$(cargo run --quiet -- tx finalize --pset "$PSET_SIGNED2" --network "$NETWORK")
 FINAL_TX_HEX=$(echo "$FINALIZE_DATA" | jq -r '.transaction_hex')
 echo "TXID: $(echo "$FINALIZE_DATA" | jq -r '.txid')"
 echo

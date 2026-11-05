@@ -17,6 +17,8 @@ use simplicity_unchained_core::{
 };
 use std::str::FromStr;
 
+use crate::demo_script::csv::validate_sequence;
+
 pub fn execute(
     pset_hex: &str,
     secret_key_hex: &str,
@@ -62,6 +64,17 @@ pub fn execute(
         .ok_or_else(|| anyhow::anyhow!("Failed to get control block for user leaf"))?;
 
     let tx = pset.extract_tx().context("Failed to extract transaction")?;
+
+    let input = tx
+        .input
+        .get(input_index)
+        .ok_or_else(|| anyhow!("Input index {} out of bounds", input_index))?;
+    validate_sequence(
+        user_leaf_script.as_bytes(),
+        i64::from(tx.version),
+        input.sequence.0,
+        input_index,
+    )?;
 
     let prevouts = pset
         .inputs()

@@ -14,13 +14,16 @@ use simplicity::elements::secp256k1_zkp::Message;
 
 use serde::{Deserialize, Serialize};
 
-use simplicity_unchained_core::utils::{UNSPENDABLE_KEY_P2TR, p2tr_multisig_leaf_btc};
+use simplicity_unchained_core::utils::{
+    UNSPENDABLE_KEY_P2TR, p2tr_multisig_leaf_btc, signing_commitment,
+};
 use validator::Validate;
 
 use simplicity_unchained_core::runner::SimplicityRunner;
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
+use crate::work::WorkPermit;
 
 use super::SignerState;
 
@@ -60,22 +63,19 @@ pub struct SignPsbtResponse {
 
 pub async fn sign_psbt(
     State(state): State<SignerState>,
+    permit: WorkPermit,
     Json(request): Json<SignPsbtRequest>,
 ) -> impl IntoResponse {
-    // Validate request using validator
-    if let Err(errors) = request.validate() {
-        let error_msg = format!("Validation failed: {}", errors);
-        log::error!("[400] Sign PSBT validation error: {}", error_msg);
-
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: error_msg }),
-        )
-            .into_response();
-    }
-
-    match sign_psbt_internal(&state, request) {
-        Ok(response) => {
+    let result = permit
+        .run(move || {
+            request
+                .validate()
+                .map_err(|e| format!("Validation failed: {}", e))?;
+            sign_psbt_internal(&state, request)
+        })
+        .await;
+    match result {
+        Ok(Ok(response)) => {
             log::info!(
                 "[200] Sign PSBT successful: Tweaked Public Key {}",
                 response.public_key_hex
@@ -83,11 +83,12 @@ pub async fn sign_psbt(
 
             (StatusCode::OK, Json(response)).into_response()
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             log::error!("[400] Sign PSBT error: {}", e);
 
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
+        Err(e) => e.into_response(),
     }
 }
 
@@ -119,21 +120,14 @@ fn sign_psbt_internal(
         TapNodeHash::from_slice(&bytes).map_err(|e| e.to_string())?
     };
 
-    let redeem_script = match request.redeem_script_hex {
-        Some(str) => {
-            let bytes = hex::decode(str)
-                .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?;
-            simplicity::elements::Script::from(bytes)
-        }
-        None => simplicity::elements::Script::new(),
-    };
+    let redeem_script = validation::decode_redeem_script(request.redeem_script_hex.as_deref())?;
 
     let cmr = SimplicityRunner::execute_bitcoin(
         &request.program,
         request.witness.as_deref(),
         request.input_index,
         &psbt,
-        redeem_script,
+        redeem_script.clone(),
         state.bitcoin_network,
     )
     .map_err(|e| format!("Simplicity execution failed: {}", e))?;
@@ -141,7 +135,10 @@ fn sign_psbt_internal(
     let untweaked_keypair = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
     let tweaked_keypair = untweaked_keypair.tap_tweak(
         &*state.secp,
-        Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
+        Some(TapNodeHash::from_byte_array(signing_commitment(
+            cmr,
+            redeem_script.as_bytes(),
+        ))),
     );
 
     let tx = psbt
@@ -216,6 +213,15 @@ fn sign_p2tr(
         })
         .collect::<Result<_, _>>()?;
 
+    if prevouts[input_index].script_pubkey
+        != bitcoin::ScriptBuf::new_p2tr_tweaked(spend_info.output_key())
+    {
+        return Err(
+            "Spent output does not match the program, redeem script, user key and recovery leaf"
+                .to_string(),
+        );
+    }
+
     let mut sighash_cache = SighashCache::new(tx);
     let sighash = sighash_cache
         .taproot_script_spend_signature_hash(
@@ -274,6 +280,7 @@ mod tests {
             secp: Arc::new(Secp256k1::new()),
             elements_network: ElementsNetwork::LiquidTestnet,
             bitcoin_network: BitcoinNetwork::Testnet,
+            work_slots: Arc::new(tokio::sync::Semaphore::new(crate::work::MAX_BLOCKING_JOBS)),
         }
     }
 
@@ -315,14 +322,16 @@ mod tests {
         state: &SignerState,
         user_secret_key: &SecretKey,
     ) -> (bitcoin::Address, TapNodeHash, bitcoin::PublicKey) {
-        let cosigner_pubkey = bitcoin::PublicKey::from_private_key(
+        let cmr = Program::<CoreExtension>::from_str(PROGRAM, None)
+            .unwrap()
+            .cmr();
+        let tweaked = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key).tap_tweak(
             &*state.secp,
-            &PrivateKey {
-                compressed: true,
-                network: NetworkKind::Test,
-                inner: state.secret_key,
-            },
+            Some(TapNodeHash::from_byte_array(signing_commitment(cmr, &[]))),
         );
+        let (key, parity) = tweaked.public_parts();
+        let cosigner_pubkey =
+            bitcoin::PublicKey::new(key.to_x_only_public_key().public_key(parity));
         let user_pubkey = bitcoin::PublicKey::from_private_key(
             &*state.secp,
             &PrivateKey {
@@ -390,6 +399,43 @@ mod tests {
 
         let signed_psbt = Psbt::deserialize(&hex::decode(&response.psbt_hex).unwrap()).unwrap();
         assert!(!signed_psbt.inputs[0].tap_script_sigs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn high_cost_program_is_rejected_by_signing_endpoint() {
+        use super::super::tests::{expensive_program, post_json};
+        let state = create_test_signer_state();
+        let user_secret = SecretKey::from_slice(&[0xab; 32]).unwrap();
+        let (address, recovery, user) = create_test_p2tr_setup(&state, &user_secret);
+        let psbt = create_test_psbt(create_test_transaction(), address.script_pubkey());
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            post_json(
+                &state,
+                "/simplicity-unchained/sign/psbt",
+                serde_json::json!({
+                    "psbt_hex": hex::encode(psbt.serialize()),
+                    "input_index": 0,
+                    "program": expensive_program(),
+                    "witness": "",
+                    "user_pubkey": hex::encode(user.to_bytes()),
+                    "user_leaf_hash_hex": hex::encode(recovery.to_byte_array()),
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("exceeds maximum 10000000 milliweight")
+        );
     }
 
     #[test]
@@ -510,7 +556,7 @@ mod tests {
         let untweaked = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key);
         let tweaked = untweaked.tap_tweak(
             &*state.secp,
-            Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
+            Some(TapNodeHash::from_byte_array(signing_commitment(cmr, &[]))),
         );
         let (cosigner_xonly, _) = tweaked.public_parts();
 
@@ -520,6 +566,278 @@ mod tests {
             .keys()
             .any(|(xonly, _)| xonly == &cosigner_xonly.to_x_only_public_key());
         assert!(has_cosigner_sig);
+    }
+
+    #[tokio::test]
+    async fn test_script_key_substitution_is_rejected() {
+        use super::super::tests::{key_script, script_key_program, tweaked_public_key};
+        use super::super::tweak::JetEnvKind;
+        use simplicity::jet::Core;
+
+        let state = create_test_signer_state();
+        let guardian = SecretKey::from_slice(&[0x11; 32]).unwrap();
+        let attacker = SecretKey::from_slice(&[0xab; 32]).unwrap();
+        let (program, witness) = script_key_program(
+            CoreExtension::GetPubkeyFromScript,
+            CoreExtension::Core(Core::Bip0340Verify),
+            &guardian,
+        );
+        let (attacker_program, attacker_witness) = script_key_program(
+            CoreExtension::GetPubkeyFromScript,
+            CoreExtension::Core(Core::Bip0340Verify),
+            &attacker,
+        );
+        assert_eq!(program, attacker_program);
+        let script = key_script(&state, &guardian);
+        let attacker_script = key_script(&state, &attacker);
+        let cosigner =
+            tweaked_public_key(&state, &program, Some(&script), JetEnvKind::Bitcoin).await;
+        let (_, recovery, user) = create_test_p2tr_setup(&state, &attacker);
+        let (address, spend_info) =
+            generate_p2tr_address_btc(&cosigner, &user, recovery, bitcoin::Network::Testnet)
+                .unwrap();
+        let tx = create_test_transaction();
+        let psbt = create_test_psbt(tx.clone(), address.script_pubkey());
+        let request = |script: Option<&str>, witness: &str| {
+            let mut request =
+                create_test_sign_request(hex::encode(psbt.serialize()), &user, recovery);
+            request.program = program.clone();
+            request.witness = Some(witness.to_string());
+            request.redeem_script_hex = script.map(str::to_string);
+            request
+        };
+        let result = sign_psbt_internal(&state, request(Some(&script), &witness)).unwrap();
+        let signed = Psbt::deserialize(&hex::decode(result.psbt_hex).unwrap()).unwrap();
+        let ((signing_key, _), signature) =
+            signed.inputs[0].tap_script_sigs.first_key_value().unwrap();
+        assert_eq!(*signing_key, cosigner.inner.x_only_public_key().0);
+        let (control, (leaf, _)) = signed.inputs[0].tap_scripts.first_key_value().unwrap();
+        assert!(control.verify_taproot_commitment(
+            &*state.secp,
+            spend_info.output_key().to_x_only_public_key(),
+            leaf,
+        ));
+        let sighash = SighashCache::new(&tx)
+            .taproot_script_spend_signature_hash(
+                0,
+                &Prevouts::All(&[psbt.inputs[0].witness_utxo.clone().unwrap()]),
+                ScriptPath::with_defaults(leaf),
+                TapSighashType::Default,
+            )
+            .unwrap();
+        state
+            .secp
+            .verify_schnorr(
+                &signature.signature,
+                &Message::from_digest(sighash.to_byte_array()),
+                signing_key,
+            )
+            .unwrap();
+        assert!(
+            sign_psbt_internal(&state, request(Some(&script), &attacker_witness))
+                .unwrap_err()
+                .contains("Simplicity execution failed")
+        );
+        assert!(
+            sign_psbt_internal(&state, request(Some(&attacker_script), &attacker_witness))
+                .unwrap_err()
+                .contains("Spent output does not match")
+        );
+        let changed_opcode = format!("51{}", &script[2..]);
+        assert!(
+            sign_psbt_internal(&state, request(Some(&changed_opcode), &witness))
+                .unwrap_err()
+                .contains("Spent output does not match")
+        );
+        assert!(sign_psbt_internal(&state, request(None, &attacker_witness)).is_err());
+        // A signature over a fixed message remains a reusable policy, by design.
+        let mut changed_tx = psbt.clone();
+        changed_tx.unsigned_tx.output[0].value = bitcoin::Amount::from_sat(40_000);
+        let mut static_replay = request(Some(&script), &witness);
+        static_replay.psbt_hex = hex::encode(changed_tx.serialize());
+        assert!(sign_psbt_internal(&state, static_replay).is_ok());
+    }
+
+    #[tokio::test]
+    async fn transaction_approval_cannot_be_replayed_for_a_different_spend() {
+        use super::super::tests::{post_json, tweaked_public_key};
+        use super::super::tweak::JetEnvKind;
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use simplicity::{
+            ConstructNode, Word,
+            jet::Core,
+            node::{CoreConstructible, WitnessConstructible},
+            types,
+        };
+        use simplicity_unchained_core::runner::bitcoin_execution_environment;
+
+        let state = create_test_signer_state();
+        let guardian = SecretKey::from_slice(&[0x11; 32]).unwrap();
+        let guardian_pair = UntweakedKeypair::from_secret_key(&*state.secp, &guardian);
+        let guardian_key = guardian_pair.x_only_public_key().0;
+        let program = types::Context::with_context(|ctx| {
+            let key = Arc::<ConstructNode>::const_word(&ctx, Word::u256(guardian_key.serialize()));
+            let hash = Arc::<ConstructNode>::jet(&ctx, &CoreExtension::TxApprovalHash);
+            let key_msg = Arc::<ConstructNode>::pair(&key, &hash).unwrap();
+            let signature = Arc::<ConstructNode>::witness(&ctx, None);
+            let args = Arc::<ConstructNode>::pair(&key_msg, &signature).unwrap();
+            let verify = Arc::<ConstructNode>::jet(&ctx, &CoreExtension::Core(Core::Bip0340Verify));
+            STANDARD.encode(
+                Arc::<ConstructNode>::comp(&args, &verify)
+                    .unwrap()
+                    .finalize_types()
+                    .unwrap()
+                    .to_vec_without_witness(),
+            )
+        });
+        let cmr = Program::<CoreExtension>::from_str(&program, None)
+            .unwrap()
+            .cmr();
+        let user_secret = SecretKey::from_slice(&[0xab; 32]).unwrap();
+        let (_, recovery, user) = create_test_p2tr_setup(&state, &user_secret);
+        let cosigner = tweaked_public_key(&state, &program, None, JetEnvKind::Bitcoin).await;
+        let (address, spend_info) =
+            generate_p2tr_address_btc(&cosigner, &user, recovery, bitcoin::Network::Testnet)
+                .unwrap();
+        let psbt = create_test_psbt(create_test_transaction(), address.script_pubkey());
+        let approval = |psbt: &Psbt| {
+            let digest = bitcoin_execution_environment(
+                psbt,
+                0,
+                cmr,
+                &simplicity::elements::Script::new(),
+                state.bitcoin_network,
+            )
+            .unwrap()
+            .approval_hash;
+            STANDARD.encode(
+                state
+                    .secp
+                    .sign_schnorr(&Message::from_digest(digest), &guardian_pair)
+                    .as_ref(),
+            )
+        };
+        let witness = approval(&psbt);
+        let body = |psbt: &Psbt, witness: &str| {
+            serde_json::json!({
+                "psbt_hex": hex::encode(psbt.serialize()),
+                "input_index": 0,
+                "program": program,
+                "witness": witness,
+                "user_pubkey": hex::encode(user.to_bytes()),
+                "user_leaf_hash_hex": hex::encode(recovery.to_byte_array()),
+            })
+        };
+        let response = post_json(
+            &state,
+            "/simplicity-unchained/sign/psbt",
+            body(&psbt, &witness),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let signed =
+            Psbt::deserialize(&hex::decode(result["psbt_hex"].as_str().unwrap()).unwrap()).unwrap();
+        let ((signing_key, _), signature) =
+            signed.inputs[0].tap_script_sigs.first_key_value().unwrap();
+        let (control, (leaf, _)) = signed.inputs[0].tap_scripts.first_key_value().unwrap();
+        assert!(control.verify_taproot_commitment(
+            &*state.secp,
+            spend_info.output_key().to_x_only_public_key(),
+            leaf,
+        ));
+        let sighash = SighashCache::new(&psbt.unsigned_tx)
+            .taproot_script_spend_signature_hash(
+                0,
+                &Prevouts::All(&[psbt.inputs[0].witness_utxo.clone().unwrap()]),
+                ScriptPath::with_defaults(leaf),
+                TapSighashType::Default,
+            )
+            .unwrap();
+        state
+            .secp
+            .verify_schnorr(
+                &signature.signature,
+                &Message::from_digest(sighash.to_byte_array()),
+                signing_key,
+            )
+            .unwrap();
+
+        let mut changed_output = psbt.clone();
+        changed_output.unsigned_tx.output[0].value = bitcoin::Amount::from_sat(40_000);
+        let mut changed_locktime = psbt.clone();
+        changed_locktime.unsigned_tx.lock_time = bitcoin::absolute::LockTime::from_consensus(1);
+        let mut changed_prevout = psbt.clone();
+        changed_prevout.inputs[0]
+            .witness_utxo
+            .as_mut()
+            .unwrap()
+            .value = bitcoin::Amount::from_sat(99_999);
+        for changed in [&changed_output, &changed_locktime, &changed_prevout] {
+            let response = post_json(
+                &state,
+                "/simplicity-unchained/sign/psbt",
+                body(changed, &witness),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let result: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert!(
+                result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Simplicity execution failed")
+            );
+        }
+        let mut other_network = state.clone();
+        other_network.bitcoin_network = BitcoinNetwork::Testnet4;
+        let response = post_json(
+            &other_network,
+            "/simplicity-unchained/sign/psbt",
+            body(&psbt, &witness),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let fresh_witness = approval(&changed_output);
+        let response = post_json(
+            &state,
+            "/simplicity-unchained/sign/psbt",
+            body(&changed_output, &fresh_witness),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_legacy_cmr_only_output_is_rejected() {
+        let state = create_test_signer_state();
+        let user_secret = SecretKey::from_slice(&[0xab; 32]).unwrap();
+        let (_, recovery, user) = create_test_p2tr_setup(&state, &user_secret);
+        let cmr = Program::<CoreExtension>::from_str(PROGRAM, None)
+            .unwrap()
+            .cmr();
+        let legacy = UntweakedKeypair::from_secret_key(&*state.secp, &state.secret_key).tap_tweak(
+            &*state.secp,
+            Some(TapNodeHash::from_byte_array(cmr.to_byte_array())),
+        );
+        let (key, parity) = legacy.public_parts();
+        let cosigner = bitcoin::PublicKey::new(key.to_x_only_public_key().public_key(parity));
+        let (address, _) =
+            generate_p2tr_address_btc(&cosigner, &user, recovery, bitcoin::Network::Testnet)
+                .unwrap();
+        let psbt = create_test_psbt(create_test_transaction(), address.script_pubkey());
+        let request = create_test_sign_request(hex::encode(psbt.serialize()), &user, recovery);
+        assert!(
+            sign_psbt_internal(&state, request)
+                .unwrap_err()
+                .contains("Spent output does not match")
+        );
     }
 
     #[test]

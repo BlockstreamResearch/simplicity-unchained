@@ -2,6 +2,7 @@
 //
 // You can utilize pubkeys embedded in scripts to verify signatures against them.
 // Or do other cryptographic operations that require pubkeys.
+// Commit to the intended script via /tweak before funding, and use the same script when signing.
 fn main() {
     let signature: [u8; 64] = 0x3d5e45a7e5e98964e523b19f460534ad68c2ace2056d6891fc2851bc88eb4a65ce0f7e69fb47fa2105d073df7619a2eaedff9c2685a5862c8c88eb13aa174bc2;
 

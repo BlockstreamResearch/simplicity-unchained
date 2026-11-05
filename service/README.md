@@ -4,7 +4,22 @@ Simplicity Unchained Service is a web service that provides endpoints to interac
 
 ## Starting the Service
 
-To start the Simplicity Unchained Servic navigate to the `service` directory and run the following command:
+First provision a configuration with a unique, persistent signing key:
+
+```bash
+umask 077
+cd service
+cp config.example.toml config.toml
+```
+
+Set `service.private_key` in the local `config.toml` to a newly generated
+32-byte secp256k1 private key (64 hex characters). Use a cryptographically secure
+generator, for example `openssl rand -hex 32`, and edit the file locally without
+putting the key in command-line arguments. Keep the file private and backed up;
+do not commit it or put it in a Docker build context. The example's empty key
+deliberately cannot start the service.
+
+Then start the service:
 
 ```bash
 cargo run --quiet -- start
@@ -24,14 +39,31 @@ By default, service configuration looks for a `config.toml` file in the current 
 [service]
 # Port on which the service will run
 port = 30431
-# secp256k1 32-byte hex-encoded private key, used for signing
-# this is a demo key, do not use it anywhere else
-private_key = "804622cda0d8e634317a12651d91751ceff5c081f2b5f63ef7912725c7275e5d"
+# Required: replace locally with a unique, persistent 32-byte private key.
+private_key = ""
 # Network to get metadata from: liquid or liquidtestnet
 elements_network = "liquidtestnet"
 # Bitcoin network for signature computation: bitcoin, testnet, testnet4
 bitcoin_network = "testnet4"
 ```
+
+### Docker
+
+The image contains the service binary but no active configuration or signing key.
+Provision a configuration outside the build context using the example above,
+then mount it read-only:
+
+```bash
+docker build -t simplicity-unchained-service .
+docker run --rm -p 30431:30431 \
+  --mount type=bind,src=/absolute/path/to/service-config.toml,dst=/app/config.toml,readonly \
+  simplicity-unchained-service
+```
+
+Run these commands from the repository root. The host file must exist and be
+readable by the container's service user (UID/GID 1000), without making the key
+world-readable. Adjust the published port if you change `service.port`.
+Starting the image without provisioning fails closed with a nonzero exit.
 
 ## Endpoints
 
@@ -52,6 +84,19 @@ The service exposes the following endpoints:
 ### 2. Sign PSBT Endpoint
 
 `POST /simplicity-unchained/sign/psbt`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig Bitcoin transaction.
+
+For per-spend authorization, the program must verify an approver signature over
+`jet::tx_approval_hash()`. The runner derives this digest from the PSBT, all
+prevouts, input index, configured Bitcoin network, and program/script commitment.
+Use the [local approval workflow](../cli/README.md#bitcoin-transaction-approvals)
+before requesting the signature. All inputs need `witness_utxo`; the approver
+must verify those prevouts independently.
+
+A fixed-message signature, hash preimage, or other static condition is still
+replayable across transactions. Merely providing a PSBT or using the new runner
+does not convert such a policy into per-spend approval. Existing static contracts
+need a new program/address to adopt the new condition. See the
+[digest definition and compatibility rules](../core/README.md#bitcoin-per-spend-approvals).
 
 **Request Body**:
 
@@ -75,7 +120,7 @@ The service exposes the following endpoints:
 - `user_pubkey`: The user's compressed public key in hexadecimal format
 - `user_leaf_hash_hex`: The user leaf hash in hexadecimal format, used to reconstruct the taproot tree
 - `witness`: The witness data required by the Simplicity program (optional)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional)
+- `redeem_script_hex`: Script bytes exposed to script-reading jets (optional; null or omitted means empty). Must exactly match the script supplied to `/tweak` before funding.
 
 **Success Response**:
 
@@ -122,7 +167,7 @@ The service exposes the following endpoints:
 - `user_pubkey`: The user's compressed public key in hexadecimal format
 - `user_leaf_hash_hex`: The user leaf hash in hexadecimal format, used to reconstruct the taproot tree
 - `witness`: The witness data required by the Simplicity program (optional)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional)
+- `redeem_script_hex`: Script bytes exposed to script-reading jets (optional; null or omitted means empty). Must exactly match the script supplied to `/tweak` before funding.
 
 **Success Response**:
 
@@ -146,18 +191,19 @@ The service exposes the following endpoints:
 
 ### 4. Tweak Endpoint
 
-`POST /simplicity-unchained/tweak`: Accepts a Simplicity program, computes its CMR (commitment Merkle root), and returns the tweaked public key using taproot key tweaking.
+`POST /simplicity-unchained/tweak`: Accepts a Simplicity program and script data, computes its CMR (commitment Merkle root), and returns the public key tweaked with a commitment to both.
 
 ### **Note**
 
-In P2TR case, key, tweaked with Simplicity CMR, used as inner key.
+The tweaked key is used in the cooperative multisig leaf, not as the P2TR internal key.
 
 **Request Body**:
 
 ```json
 {
   "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
-  "jet_env": "elements"
+  "jet_env": "elements",
+  "redeem_script_hex": null
 }
 ```
 
@@ -165,6 +211,7 @@ In P2TR case, key, tweaked with Simplicity CMR, used as inner key.
 
 - `program`: The Simplicity program to compute the CMR from (must be a non-empty string)
 - `jet_env`: The jet environment to use, either `elements` or `bitcoin` (optional, defaults to `elements`)
+- `redeem_script_hex`: Exact script bytes to commit to and later expose to script-reading jets (optional; null, omitted, or `""` means empty).
 
 **Success Response**:
 
