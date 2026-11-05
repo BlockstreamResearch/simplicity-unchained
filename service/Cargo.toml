@@ -23,4 +23,5 @@ core = { path = "../core" }
 
 [dev-dependencies]
 http-body = "1"
+tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

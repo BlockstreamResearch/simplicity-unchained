@@ -53,7 +53,9 @@ requests, consistently committing to an empty script.
 
 ## Demo
 
-First, ensure the Simplicity Unchained service is running:
+First, provision a private configuration and unique signing key following the
+service's [startup instructions](../service/README.md#starting-the-service).
+Then ensure the Simplicity Unchained service is running:
 
 ```bash
 cd service

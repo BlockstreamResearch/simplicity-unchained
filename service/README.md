@@ -4,7 +4,22 @@ Simplicity Unchained Service is a web service that provides endpoints to interac
 
 ## Starting the Service
 
-To start the Simplicity Unchained Servic navigate to the `service` directory and run the following command:
+First provision a configuration with a unique, persistent signing key:
+
+```bash
+umask 077
+cd service
+cp config.example.toml config.toml
+```
+
+Set `service.private_key` in the local `config.toml` to a newly generated
+32-byte secp256k1 private key (64 hex characters). Use a cryptographically secure
+generator, for example `openssl rand -hex 32`, and edit the file locally without
+putting the key in command-line arguments. Keep the file private and backed up;
+do not commit it or put it in a Docker build context. The example's empty key
+deliberately cannot start the service.
+
+Then start the service:
 
 ```bash
 cargo run --quiet -- start
@@ -24,14 +39,31 @@ By default, service configuration looks for a `config.toml` file in the current 
 [service]
 # Port on which the service will run
 port = 30431
-# secp256k1 32-byte hex-encoded private key, used for signing
-# this is a demo key, do not use it anywhere else
-private_key = "804622cda0d8e634317a12651d91751ceff5c081f2b5f63ef7912725c7275e5d"
+# Required: replace locally with a unique, persistent 32-byte private key.
+private_key = ""
 # Network to get metadata from: liquid or liquidtestnet
 elements_network = "liquidtestnet"
 # Bitcoin network for signature computation: bitcoin, testnet, testnet4
 bitcoin_network = "testnet4"
 ```
+
+### Docker
+
+The image contains the service binary but no active configuration or signing key.
+Provision a configuration outside the build context using the example above,
+then mount it read-only:
+
+```bash
+docker build -t simplicity-unchained-service .
+docker run --rm -p 30431:30431 \
+  --mount type=bind,src=/absolute/path/to/service-config.toml,dst=/app/config.toml,readonly \
+  simplicity-unchained-service
+```
+
+Run these commands from the repository root. The host file must exist and be
+readable by the container's service user (UID/GID 1000), without making the key
+world-readable. Adjust the published port if you change `service.port`.
+Starting the image without provisioning fails closed with a nonzero exit.
 
 ## Endpoints
 

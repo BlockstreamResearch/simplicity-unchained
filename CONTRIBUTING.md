@@ -33,6 +33,9 @@ If this is just a bug report or a feature request, please open an issue first so
 
 ## Running the Service Locally
 
+First follow the service's [key-provisioning instructions](service/README.md#starting-the-service).
+The repository no longer supplies an active configuration or a usable signing key.
+
 ```bash
 cd service
 cargo run --quiet -- start
@@ -60,10 +63,15 @@ The multi-stage `Dockerfile` builds the `service` binary. To build and run:
 
 ```bash
 docker build -t simplicity-unchained-service .
-docker run -p 8080:8080 simplicity-unchained-service
+docker run --rm -p 30431:30431 \
+  --mount type=bind,src=/absolute/path/to/service-config.toml,dst=/app/config.toml,readonly \
+  simplicity-unchained-service
 ```
 
-The container runs as a non-root user (`uid=1000`). Ensure mounted config files are readable by that user.
+Provision the host configuration outside the Docker build context with a unique
+signing key; see the service [Docker instructions](service/README.md#docker).
+The container runs as a non-root user (`uid=1000`). Ensure the private mounted
+configuration is readable by that user. An unconfigured container exits unsuccessfully.
 
 ## Reporting Bugs
 

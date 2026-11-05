@@ -16,11 +16,24 @@ use serde::Serialize;
 
 use serde_json::json;
 
-use simplicity::elements::secp256k1_zkp::{All, Secp256k1, SecretKey};
+use simplicity::elements::secp256k1_zkp::{All, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 
 use crate::work::{MAX_BLOCKING_JOBS, MAX_BODY_BYTES};
 use simplicity_unchained_core::{BitcoinNetwork, ElementsNetwork};
 use tokio::sync::Semaphore;
+
+// Public identity of the disclosed demo key; also reject its negation (same Taproot identity).
+const DISCLOSED_DEMO_KEY: &str = "3523982d58e94be3b735731593f8225043880d53727235b566c515d24a0f7baf";
+
+fn validate_signing_identity(public_key: XOnlyPublicKey) -> Result<(), String> {
+    if public_key.to_string() == DISCLOSED_DEMO_KEY {
+        return Err(
+            "The publicly disclosed demo signing key is not allowed; provision a new private key"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
 
 async fn version() -> impl IntoResponse {
     Json(json!({
@@ -66,9 +79,16 @@ impl SignerState {
         let secret_key = SecretKey::from_slice(&secret_key_bytes)
             .map_err(|e| format!("Invalid private key: {}", e))?;
 
+        let secp = Secp256k1::new();
+        validate_signing_identity(
+            PublicKey::from_secret_key(&secp, &secret_key)
+                .x_only_public_key()
+                .0,
+        )?;
+
         Ok(Self {
             secret_key,
-            secp: Arc::new(Secp256k1::new()),
+            secp: Arc::new(secp),
             elements_network,
             bitcoin_network,
             work_slots: Arc::new(Semaphore::new(MAX_BLOCKING_JOBS)),
@@ -109,6 +129,34 @@ mod tests {
             BitcoinNetwork::Testnet,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn disclosed_demo_identity_is_rejected_for_both_parities() {
+        for prefix in ["02", "03"] {
+            let public_key = simplicity::elements::secp256k1_zkp::PublicKey::from_str(&format!(
+                "{}{}",
+                prefix, DISCLOSED_DEMO_KEY
+            ))
+            .unwrap();
+            let result = validate_signing_identity(public_key.x_only_public_key().0);
+            assert!(
+                result
+                    .unwrap_err()
+                    .contains("publicly disclosed demo signing key")
+            );
+        }
+        assert!(
+            SignerState::new("", ElementsNetwork::LiquidTestnet, BitcoinNetwork::Testnet,).is_err()
+        );
+        assert!(
+            SignerState::new(
+                &hex::encode([0; 32]),
+                ElementsNetwork::LiquidTestnet,
+                BitcoinNetwork::Testnet,
+            )
+            .is_err()
+        );
     }
 
     pub(super) async fn post_json(
