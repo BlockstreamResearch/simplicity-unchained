@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod handlers;
 mod validation;
+mod work;
 
 use cli::{Cli, Commands};
 use config::Config;

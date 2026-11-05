@@ -17,6 +17,7 @@ use simplicity_unchained_core::utils::signing_commitment;
 
 use crate::handlers::{ErrorResponse, SignerState};
 use crate::validation;
+use crate::work::WorkPermit;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -42,22 +43,19 @@ pub struct TweakResponse {
 
 pub async fn get_tweaked_key(
     State(state): State<SignerState>,
+    permit: WorkPermit,
     Json(request): Json<TweakRequest>,
 ) -> impl IntoResponse {
-    // Validate request using validator
-    if let Err(errors) = request.validate() {
-        let error_msg = format!("Validation failed: {}", errors);
-        log::error!("[400] Tweak validation error: {}", error_msg);
-
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: error_msg }),
-        )
-            .into_response();
-    }
-
-    match get_tweaked_key_internal(&state, request) {
-        Ok(response) => {
+    let result = permit
+        .run(move || {
+            request
+                .validate()
+                .map_err(|e| format!("Validation failed: {}", e))?;
+            get_tweaked_key_internal(&state, request)
+        })
+        .await;
+    match result {
+        Ok(Ok(response)) => {
             log::info!(
                 "[200] Tweak successful: CMR {}, Tweaked Public Key {}",
                 response.cmr_hex,
@@ -66,11 +64,12 @@ pub async fn get_tweaked_key(
 
             (StatusCode::OK, Json(response)).into_response()
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             log::error!("[400] Tweak error: {}", e);
 
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
+        Err(e) => e.into_response(),
     }
 }
 
@@ -170,6 +169,7 @@ mod tests {
             secp: Arc::new(Secp256k1::new()),
             elements_network: ElementsNetwork::LiquidTestnet,
             bitcoin_network: BitcoinNetwork::Testnet,
+            work_slots: Arc::new(tokio::sync::Semaphore::new(crate::work::MAX_BLOCKING_JOBS)),
         }
     }
 

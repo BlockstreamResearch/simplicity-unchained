@@ -27,6 +27,7 @@ use validator::Validate;
 
 use crate::handlers::ErrorResponse;
 use crate::validation;
+use crate::work::WorkPermit;
 
 use super::SignerState;
 
@@ -67,22 +68,19 @@ pub struct SignPsetResponse {
 
 pub async fn sign_pset(
     State(state): State<SignerState>,
+    permit: WorkPermit,
     Json(request): Json<SignPsetRequest>,
 ) -> impl IntoResponse {
-    // Validate request using validator
-    if let Err(errors) = request.validate() {
-        let error_msg = format!("Validation failed: {}", errors);
-        log::error!("[400] Sign PSET validation error: {}", error_msg);
-
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: error_msg }),
-        )
-            .into_response();
-    }
-
-    match sign_pset_internal(&state, request) {
-        Ok(response) => {
+    let result = permit
+        .run(move || {
+            request
+                .validate()
+                .map_err(|e| format!("Validation failed: {}", e))?;
+            sign_pset_internal(&state, request)
+        })
+        .await;
+    match result {
+        Ok(Ok(response)) => {
             log::info!(
                 "[200] Sign PSET successful: Tweaked Public Key {}",
                 response.public_key_hex
@@ -90,11 +88,12 @@ pub async fn sign_pset(
 
             (StatusCode::OK, Json(response)).into_response()
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             log::error!("[400] Sign PSET error: {}", e);
 
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
+        Err(e) => e.into_response(),
     }
 }
 fn sign_pset_internal(
@@ -295,6 +294,7 @@ mod tests {
             secp: Arc::new(Secp256k1::new()),
             elements_network: ElementsNetwork::LiquidTestnet,
             bitcoin_network: BitcoinNetwork::Testnet,
+            work_slots: Arc::new(tokio::sync::Semaphore::new(crate::work::MAX_BLOCKING_JOBS)),
         }
     }
 
@@ -433,6 +433,47 @@ mod tests {
 
         let sig_bytes = hex::decode(&response.signature_hex).unwrap();
         assert_eq!(sig_bytes.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn high_cost_program_is_rejected_by_signing_endpoint() {
+        use super::super::tests::{expensive_program, post_json};
+        let state = create_test_signer_state();
+        let user_secret = SecretKey::from_slice(&[0xab; 32]).unwrap();
+        let (address, recovery, user) = create_test_p2tr_setup(&state, &user_secret);
+        let pset = create_test_pset(
+            create_test_transaction(),
+            address.script_pubkey(),
+            elements::confidential::Value::Explicit(100_000),
+        );
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            post_json(
+                &state,
+                "/simplicity-unchained/sign/pset",
+                serde_json::json!({
+                    "pset_hex": hex::encode(elements::encode::serialize(&pset)),
+                    "input_index": 0,
+                    "program": expensive_program(),
+                    "witness": "",
+                    "user_pubkey": hex::encode(user.to_bytes()),
+                    "user_leaf_hash_hex": hex::encode(recovery.to_byte_array()),
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("exceeds maximum 10000000 milliweight")
+        );
     }
 
     #[test]
