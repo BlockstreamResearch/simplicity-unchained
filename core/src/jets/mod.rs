@@ -63,6 +63,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn bitcoin_custom_jet_encodings_and_identities_are_stable() {
+        for (jet, expected) in [
+            (CoreExtension::GetOpcodeFromScript, 0xf8u8),
+            (CoreExtension::GetPubkeyFromScript, 0xfc),
+            (CoreExtension::TxApprovalHash, 0xfe),
+        ] {
+            let mut encoded = Vec::new();
+            let mut writer = BitWriter::new(&mut encoded as &mut dyn std::io::Write);
+            jet.encode(&mut writer).unwrap();
+            writer.flush_all().unwrap();
+            assert_eq!(encoded, [expected]);
+        }
+        assert_eq!(
+            hex::encode(CoreExtension::GetOpcodeFromScript.cmr().to_byte_array()),
+            "dcccd2895922e75b018b0846e5cd4963808bbfd48b47234475607f90e70ee032",
+        );
+        assert_eq!(
+            hex::encode(CoreExtension::GetPubkeyFromScript.cmr().to_byte_array()),
+            "27eab09068b035af619713335b73d2520ecc02090067c8fccabb4d72a655cdcb",
+        );
+        assert_eq!(
+            CoreExtension::parse("tx_approval_hash").unwrap(),
+            CoreExtension::TxApprovalHash,
+        );
+        assert_eq!(
+            CoreExtension::TxApprovalHash.to_string(),
+            "tx_approval_hash"
+        );
+        assert_eq!(
+            CoreExtension::TxApprovalHash.cmr().to_byte_array(),
+            simplicity::hashes::sha256::Hash::hash(b"SimplicityUnchained/Jet/tx_approval_hash/v1",)
+                .to_byte_array(),
+        );
+    }
+
+    #[test]
     fn test_get_opcode() {
         let script = Script::from_hex_no_prefix(
             "5221033523982d58e94be3b735731593f8225043880d53727235b566c515d24a0f7baf21025eb4655feae15a304653e27441ca8e8ced2bef89c22ab6b20424b4c07b3d14cc52ae"

@@ -45,11 +45,47 @@ requests, consistently committing to an empty script.
 ### btc-tx (Bitcoin)
 
 - `btc-tx create` — Create a PSBT from UTXOs.
+- `btc-tx approval-hash` — Compute the digest an approver must sign for a Bitcoin `tx_approval_hash` policy.
 - `btc-tx sign` — Sign a PSBT with one secret key (for local co-signing).
 - `btc-tx finalize` — Finalize a PSBT into a broadcastable transaction.
 - `btc-tx build-csv-leaf` — Build a CSV recovery leaf script from a user pubkey and timelock.
 - `btc-tx spend-user-leaf` — Spend the user leaf (Leaf 1) of a P2TR output independently.
 - `btc-tx finalize-user-leaf` — Finalize a user leaf PSBT into a broadcastable transaction.
+
+### Bitcoin Transaction Approvals
+
+Use a program that explicitly verifies the approver's BIP-340 signature against
+`jet::tx_approval_hash()`. Build it with the updated core `CoreExtension` jet table.
+Choose the approver public key and script data before generating and funding the
+address.
+
+For each spend, populate `witness_utxo` for **every** PSBT input, independently
+verify the prevouts, review the transaction, and calculate its approval digest:
+
+```bash
+cargo run --quiet -- btc-tx approval-hash \
+  --psbt "$PSBT_HEX" \
+  --input-index 0 \
+  --program "$PROGRAM" \
+  --redeem-script-hex "$REDEEM_SCRIPT_HEX" \
+  --network testnet4
+```
+
+Run this from the `cli` directory. Omit `--redeem-script-hex` for an empty script.
+`--network` is required and must match the service's configured `bitcoin_network`
+(`bitcoin`, `testnet`, or `testnet4`), even for a local test deployment.
+
+The JSON response contains `approval_hash_hex` and `cmr_hex`, both 64-character
+hex strings. Have the approver sign the **32 decoded approval-hash bytes**, not
+the ASCII hex text, using BIP-340. Encode the signature into the program's witness
+and submit the same PSBT, input, program and script to `/sign/psbt`. Recompute and
+obtain a fresh approval after changing the transaction or prevouts.
+
+The approval digest is not the co-signer's Taproot sighash. See the
+[versioned digest definition](../core/README.md#bitcoin-per-spend-approvals).
+Static hashlocks and fixed-message signature policies retain their intentionally
+replayable behavior; existing funded static policies are not upgraded by this
+command.
 
 ## Demo
 

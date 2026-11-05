@@ -85,6 +85,19 @@ The service exposes the following endpoints:
 
 `POST /simplicity-unchained/sign/psbt`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig Bitcoin transaction.
 
+For per-spend authorization, the program must verify an approver signature over
+`jet::tx_approval_hash()`. The runner derives this digest from the PSBT, all
+prevouts, input index, configured Bitcoin network, and program/script commitment.
+Use the [local approval workflow](../cli/README.md#bitcoin-transaction-approvals)
+before requesting the signature. All inputs need `witness_utxo`; the approver
+must verify those prevouts independently.
+
+A fixed-message signature, hash preimage, or other static condition is still
+replayable across transactions. Merely providing a PSBT or using the new runner
+does not convert such a policy into per-spend approval. Existing static contracts
+need a new program/address to adopt the new condition. See the
+[digest definition and compatibility rules](../core/README.md#bitcoin-per-spend-approvals).
+
 **Request Body**:
 
 ```json

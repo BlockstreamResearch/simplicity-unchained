@@ -32,12 +32,12 @@ impl PluginBase for CoreExtension {
         env.redeem_script.as_bytes()
     }
 
-    fn tx(_env: &Self::Env) -> Vec<u8> {
-        Vec::new()
+    fn tx(env: &Self::Env) -> Vec<u8> {
+        simplicity::bitcoin::consensus::serialize(&env.env.tx)
     }
 
-    fn input_index(_env: &Self::Env) -> u32 {
-        0
+    fn input_index(env: &Self::Env) -> u32 {
+        env.env.input_index
     }
 }
 

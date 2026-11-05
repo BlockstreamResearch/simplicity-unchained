@@ -69,6 +69,25 @@ enum KeypairCommands {
 
 #[derive(Subcommand)]
 enum BtcTxCommands {
+    /// Compute the per-spend digest for a tx_approval_hash policy (not a Taproot sighash)
+    ApprovalHash {
+        /// PSBT in hex, with witness_utxo populated for every input
+        #[arg(long)]
+        psbt: String,
+        /// Selected input
+        #[arg(long)]
+        input_index: usize,
+        /// Encoded Bitcoin Simplicity program (hex or base64)
+        #[arg(long)]
+        program: String,
+        /// Exact script data committed at address generation
+        #[arg(long)]
+        redeem_script_hex: Option<String>,
+        /// Must match the service's bitcoin_network (bitcoin, testnet, testnet4)
+        #[arg(long)]
+        network: String,
+    },
+
     /// Create a PSBT (PartiallySignedTransaction) from UTXOs
     Create {
         /// Transaction input in format: txid:vout
@@ -357,6 +376,22 @@ fn main() -> Result<()> {
         },
 
         Commands::BtcTx { command } => match command {
+            BtcTxCommands::ApprovalHash {
+                psbt,
+                input_index,
+                program,
+                redeem_script_hex,
+                network,
+            } => {
+                commands::btc_tx::approval_hash::execute(
+                    &psbt,
+                    input_index,
+                    &program,
+                    redeem_script_hex.as_deref(),
+                    &network,
+                )?;
+            }
+
             BtcTxCommands::Create {
                 inputs,
                 outputs,
