@@ -102,7 +102,7 @@ enum BtcTxCommands {
         #[arg(short, long, default_value = "bitcoin")]
         network: String,
 
-        /// Relative timelock in blocks for recovery path
+        /// Relative locktime in blocks for all inputs; CSV recovery requires >= the leaf delay
         #[arg(long)]
         sequence: Option<u16>,
     },
@@ -202,7 +202,7 @@ enum TxCommands {
         #[arg(short, long, default_value = "elements")]
         network: String,
 
-        /// Relative timelock in blocks for recovery path
+        /// Relative locktime in blocks for all inputs; CSV recovery requires >= the leaf delay
         #[arg(long)]
         sequence: Option<u16>,
     },

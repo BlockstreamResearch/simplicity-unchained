@@ -12,6 +12,8 @@ use simplicity::{
     },
 };
 
+use super::csv::validate_sequence;
+
 pub fn build_csv_script(user_pubkey_hex: &str, timelock: u16) -> Result<()> {
     let user_pubkey_bytes =
         hex::decode(user_pubkey_hex).context("Failed to decode user pubkey hex")?;
@@ -61,6 +63,13 @@ fn finalize_internal(tx: &mut elements::Transaction, i: usize, input: &pset::Inp
         .next()
         .map(|(cb, s)| (cb.clone(), s.clone()))
         .ok_or_else(|| anyhow!("Input {} missing tap_scripts", i))?;
+
+    validate_sequence(
+        leaf_script.as_bytes(),
+        i64::from(tx.version),
+        tx.input[i].sequence.0,
+        i,
+    )?;
 
     let leaf_hash = TapLeafHash::from_script(&leaf_script, leaf_version);
 

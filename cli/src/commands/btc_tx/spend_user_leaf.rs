@@ -16,6 +16,8 @@ use simplicity::bitcoin::{self, base64};
 use simplicity_unchained_core::utils::{UNSPENDABLE_KEY_P2TR, p2tr_multisig_leaf_btc};
 use std::str::FromStr;
 
+use crate::demo_script::csv::validate_sequence;
+
 pub fn execute(
     psbt_hex: &str,
     secret_key_hex: &str,
@@ -60,6 +62,17 @@ pub fn execute(
         .clone()
         .extract_tx()
         .context("Failed to extract transaction")?;
+
+    let input = tx
+        .input
+        .get(input_index)
+        .ok_or_else(|| anyhow::anyhow!("Input index {} out of bounds", input_index))?;
+    validate_sequence(
+        user_leaf_script.as_bytes(),
+        i64::from(tx.version.0),
+        input.sequence.0,
+        input_index,
+    )?;
 
     let prevouts = psbt
         .inputs
