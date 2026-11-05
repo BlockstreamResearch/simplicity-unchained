@@ -21,6 +21,14 @@ Commands:
 
 - `address multisig` — Generate a P2TR 2-of-2 multisig address from two public keys and a user leaf hash.
 
+Pass the updated service `/tweak` response's `tweaked_public_key_hex` as
+`--pubkey1`, not the untweaked service key or an old CMR-only tweaked key.
+When using script-reading jets, include the intended `redeem_script_hex` in the
+`/tweak` request before funding and supply the identical bytes to `/sign/psbt`
+or `/sign/pset`. Use that same tweaked key for `--cosigner-pubkey` when signing
+or spending the recovery leaf. The demo scripts omit the script in both
+requests, consistently committing to an empty script.
+
 ### keypair
 
 - `keypair generate` — Generate a new secp256k1 keypair.

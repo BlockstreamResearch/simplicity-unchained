@@ -9,7 +9,7 @@ use simplicity::elements::{
     secp256k1_zkp::{Secp256k1, SecretKey, rand::rngs::OsRng},
 };
 use simplicity::hashes::{HashEngine, sha256};
-use simplicity::{ToXOnlyPubkey, bitcoin};
+use simplicity::{Cmr, ToXOnlyPubkey, bitcoin};
 
 use thiserror::Error;
 
@@ -27,6 +27,20 @@ pub enum UtilsError {
 }
 
 const SIMPLICITY_TAG_PREFIX: &[u8] = b"Simplicity\x1fCommitment\x1f";
+
+/// Version 1 key commitment: tagged SHA256 of `CMR || SHA256(redeem_script)`.
+///
+/// The script bytes must be identical at address generation and execution time.
+/// Empty scripts are committed too; this never falls back to a CMR-only tweak.
+pub fn signing_commitment(cmr: Cmr, redeem_script: &[u8]) -> [u8; 32] {
+    let tag = sha256::Hash::hash(b"SimplicityUnchained/SigningCommitment/v1");
+    let mut engine = sha256::Hash::engine();
+    engine.input(tag.as_byte_array());
+    engine.input(tag.as_byte_array());
+    engine.input(&cmr.to_byte_array());
+    engine.input(sha256::Hash::hash(redeem_script).as_byte_array());
+    sha256::Hash::from_engine(engine).to_byte_array()
+}
 
 const JETIV: sha256::Midstate = sha256::Midstate::new(
     [
@@ -289,6 +303,26 @@ pub fn generate_p2tr_address_btc(
 mod tests {
     use super::*;
     use simplicity::elements::secp256k1_zkp::{PublicKey as Secp256k1PublicKey, Secp256k1};
+
+    #[test]
+    fn test_signing_commitment() {
+        let cmr = Cmr::from_byte_array([1; 32]);
+        let mut script = vec![0x52, 0x21, 0x02];
+        script.extend_from_slice(&[2; 32]);
+        let commitment = signing_commitment(cmr, &script);
+        assert_eq!(
+            hex::encode(commitment),
+            "d1eeca3675cdeeb910edb4644dc13ffba0b2d8f1ee9c10133ea724f089994f57"
+        );
+        assert_ne!(
+            commitment,
+            signing_commitment(Cmr::from_byte_array([2; 32]), &script)
+        );
+        script[2] = 0x03;
+        assert_ne!(commitment, signing_commitment(cmr, &script));
+        assert_ne!(signing_commitment(cmr, &[]), cmr.to_byte_array());
+        assert_ne!(signing_commitment(cmr, &[]), signing_commitment(cmr, &[0]));
+    }
 
     #[test]
     fn test_generate_keypair() {

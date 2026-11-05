@@ -41,10 +41,9 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AddressCommands {
-    /// Generate a 2-of-2 multisig address from two public keys.
-    /// Use --type to select p2sh (legacy) or p2wsh (segwit v0). Defaults to p2wsh.
+    /// Generate a P2TR 2-of-2 multisig address from two public keys.
     Multisig {
-        /// First public key in hex format
+        /// Script-bound tweaked cosigner public key from the service /tweak endpoint, in hex
         #[arg(short = '1', long)]
         pubkey1: String,
 

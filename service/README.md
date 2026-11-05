@@ -75,7 +75,7 @@ The service exposes the following endpoints:
 - `user_pubkey`: The user's compressed public key in hexadecimal format
 - `user_leaf_hash_hex`: The user leaf hash in hexadecimal format, used to reconstruct the taproot tree
 - `witness`: The witness data required by the Simplicity program (optional)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional)
+- `redeem_script_hex`: Script bytes exposed to script-reading jets (optional; null or omitted means empty). Must exactly match the script supplied to `/tweak` before funding.
 
 **Success Response**:
 
@@ -122,7 +122,7 @@ The service exposes the following endpoints:
 - `user_pubkey`: The user's compressed public key in hexadecimal format
 - `user_leaf_hash_hex`: The user leaf hash in hexadecimal format, used to reconstruct the taproot tree
 - `witness`: The witness data required by the Simplicity program (optional)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation (optional)
+- `redeem_script_hex`: Script bytes exposed to script-reading jets (optional; null or omitted means empty). Must exactly match the script supplied to `/tweak` before funding.
 
 **Success Response**:
 
@@ -146,18 +146,19 @@ The service exposes the following endpoints:
 
 ### 4. Tweak Endpoint
 
-`POST /simplicity-unchained/tweak`: Accepts a Simplicity program, computes its CMR (commitment Merkle root), and returns the tweaked public key using taproot key tweaking.
+`POST /simplicity-unchained/tweak`: Accepts a Simplicity program and script data, computes its CMR (commitment Merkle root), and returns the public key tweaked with a commitment to both.
 
 ### **Note**
 
-In P2TR case, key, tweaked with Simplicity CMR, used as inner key.
+The tweaked key is used in the cooperative multisig leaf, not as the P2TR internal key.
 
 **Request Body**:
 
 ```json
 {
   "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
-  "jet_env": "elements"
+  "jet_env": "elements",
+  "redeem_script_hex": null
 }
 ```
 
@@ -165,6 +166,7 @@ In P2TR case, key, tweaked with Simplicity CMR, used as inner key.
 
 - `program`: The Simplicity program to compute the CMR from (must be a non-empty string)
 - `jet_env`: The jet environment to use, either `elements` or `bitcoin` (optional, defaults to `elements`)
+- `redeem_script_hex`: Exact script bytes to commit to and later expose to script-reading jets (optional; null, omitted, or `""` means empty).
 
 **Success Response**:
 

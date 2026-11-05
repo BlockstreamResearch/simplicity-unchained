@@ -23,3 +23,12 @@ pub fn validate_redeem_script(value: &str) -> Result<(), ValidationError> {
 
     Ok(())
 }
+
+pub fn decode_redeem_script(value: Option<&str>) -> Result<simplicity::elements::Script, String> {
+    let bytes = value
+        .map(hex::decode)
+        .transpose()
+        .map_err(|e| format!("Failed to decode redeem script hex: {}", e))?
+        .unwrap_or_default();
+    Ok(simplicity::elements::Script::from(bytes))
+}
