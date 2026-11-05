@@ -107,6 +107,8 @@ pub enum SigExtractionError {
     InvalidPubKey(usize, usize),
     #[error("Input {0}: expected 32-byte xonly pk at position {1}")]
     ExpectedPubkey(usize, usize),
+    #[error("Input {0}: unexpected opcode at position {1}")]
+    UnexpectedOpcode(usize, usize),
     #[error("Input {0}: recovery key does not match multisig user key")]
     RecoveryKeyMismatch(usize),
 }
@@ -169,7 +171,7 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_btc(
     input_index: usize,
 ) -> Result<[bitcoin::XOnlyPublicKey; 2], SigExtractionError> {
     let instructions = script
-        .instructions()
+        .instructions_minimal()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| SigExtractionError::ParseFail(input_index))?;
 
@@ -180,6 +182,17 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_btc(
             6,
             instructions.len(),
         ));
+    }
+
+    for (position, opcode) in [
+        (1, bitcoin::opcodes::all::OP_CHECKSIG),
+        (3, bitcoin::opcodes::all::OP_CHECKSIGADD),
+        (4, bitcoin::opcodes::all::OP_PUSHNUM_2),
+        (5, bitcoin::opcodes::all::OP_EQUAL),
+    ] {
+        if instructions[position] != bitcoin::script::Instruction::Op(opcode) {
+            return Err(SigExtractionError::UnexpectedOpcode(input_index, position));
+        }
     }
 
     let pk1 = match &instructions[0] {
@@ -214,7 +227,7 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_elements(
     input_index: usize,
 ) -> Result<[elements::secp256k1_zkp::XOnlyPublicKey; 2], SigExtractionError> {
     let instructions = script
-        .instructions()
+        .instructions_minimal()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| SigExtractionError::ParseFail(input_index))?;
 
@@ -225,6 +238,17 @@ pub fn extract_pubkeys_from_p2tr_multisig_leaf_elements(
             6,
             instructions.len(),
         ));
+    }
+
+    for (position, opcode) in [
+        (1, elements::opcodes::all::OP_CHECKSIG),
+        (3, elements::opcodes::all::OP_CHECKSIGADD),
+        (4, elements::opcodes::all::OP_PUSHNUM_2),
+        (5, elements::opcodes::all::OP_EQUAL),
+    ] {
+        if instructions[position] != elements::script::Instruction::Op(opcode) {
+            return Err(SigExtractionError::UnexpectedOpcode(input_index, position));
+        }
     }
 
     let pk1 = match &instructions[0] {
@@ -303,6 +327,74 @@ pub fn generate_p2tr_address_btc(
 mod tests {
     use super::*;
     use simplicity::elements::secp256k1_zkp::{PublicKey as Secp256k1PublicKey, Secp256k1};
+
+    #[test]
+    fn multisig_leaf_parsers_require_every_opcode_and_canonical_pushes() {
+        let (_, cosigner) = generate_keypair();
+        let (_, user) = generate_keypair();
+        let btc = p2tr_multisig_leaf_btc(&cosigner, &user);
+        let elements = p2tr_multisig_leaf_elements(&cosigner, &user);
+        assert_eq!(
+            extract_pubkeys_from_p2tr_multisig_leaf_btc(&btc, 0).unwrap(),
+            [cosigner.to_x_only_pubkey(), user.to_x_only_pubkey()],
+        );
+        assert_eq!(
+            extract_pubkeys_from_p2tr_multisig_leaf_elements(&elements, 0).unwrap(),
+            [cosigner.to_x_only_pubkey(), user.to_x_only_pubkey()],
+        );
+        for original in [btc.as_bytes(), elements.as_bytes()] {
+            for position in [33, 67, 68, 69] {
+                let mut changed = original.to_vec();
+                changed[position] = 0x61; // OP_NOP preserves instruction count.
+                assert!(matches!(
+                    extract_pubkeys_from_p2tr_multisig_leaf_btc(
+                        &bitcoin::ScriptBuf::from_bytes(changed.clone()),
+                        3
+                    ),
+                    Err(SigExtractionError::UnexpectedOpcode(3, _)),
+                ));
+                assert!(matches!(
+                    extract_pubkeys_from_p2tr_multisig_leaf_elements(
+                        &elements::Script::from(changed),
+                        3
+                    ),
+                    Err(SigExtractionError::UnexpectedOpcode(3, _)),
+                ));
+            }
+            let mut nonminimal = vec![0x4c, 0x20];
+            nonminimal.extend_from_slice(&original[1..]);
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_btc(
+                    &bitcoin::ScriptBuf::from_bytes(nonminimal.clone()),
+                    0,
+                )
+                .is_err()
+            );
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_elements(
+                    &elements::Script::from(nonminimal),
+                    0,
+                )
+                .is_err()
+            );
+            let mut invalid_key = original.to_vec();
+            invalid_key[1..33].fill(0xff);
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_btc(
+                    &bitcoin::ScriptBuf::from_bytes(invalid_key.clone()),
+                    0,
+                )
+                .is_err()
+            );
+            assert!(
+                extract_pubkeys_from_p2tr_multisig_leaf_elements(
+                    &elements::Script::from(invalid_key),
+                    0,
+                )
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn test_signing_commitment() {

@@ -238,6 +238,10 @@ enum TxCommands {
         /// PSET in hex format
         #[arg(short, long)]
         pset: String,
+
+        /// Network used for signature verification (liquid, liquid_testnet)
+        #[arg(short, long, default_value = "liquid_testnet")]
+        network: String,
     },
 
     /// Spend the user leaf (Leaf 1) of a P2TR output independently
@@ -342,8 +346,8 @@ fn main() -> Result<()> {
                 )?;
             }
 
-            TxCommands::Finalize { pset } => {
-                commands::tx::finalize::execute(&pset)?;
+            TxCommands::Finalize { pset, network } => {
+                commands::tx::finalize::execute(&pset, &network)?;
             }
             TxCommands::SpendUserLeaf {
                 psbt: pset,
