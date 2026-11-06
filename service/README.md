@@ -54,6 +54,10 @@ Liquid Testnet. Requests must match the configured network for their profile.
 
 ### Docker
 
+To run the prebuilt release image without compiling, follow
+[Run your own SU service](../README.md#run-your-own-su-service).
+The instructions below build an image from the local checkout.
+
 The image contains the service binary but no active configuration or signing key.
 Provision a configuration outside the build context using the example above,
 then mount it read-only:
