@@ -1,0 +1,33 @@
+// J53 variant: fresh approvals for each input, even within the same transaction.
+// Illustrative public keys have KNOWN private keys. Replace all three before funding.
+fn not(bit: bool) -> bool {
+    <u1>::into(jet::complement_1(<bool>::into(bit)))
+}
+
+fn checksig_add(counter: u8, pk: Pubkey, digest: u256, maybe_sig: Option<Signature>) -> u8 {
+    match maybe_sig {
+        Some(sig: Signature) => {
+            jet::bip_0340_verify((pk, digest), sig);
+            let (carry, next): (bool, u8) = jet::increment_8(counter);
+            assert!(not(carry));
+            next
+        }
+        None => counter,
+    }
+}
+
+fn main() {
+    let pk1: Pubkey = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
+    let pk2: Pubkey = 0xc6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5;
+    let pk3: Pubkey = 0xf9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9;
+    assert!(not(jet::eq_256(pk1, pk2)));
+    assert!(not(jet::eq_256(pk1, pk3)));
+    assert!(not(jet::eq_256(pk2, pk3)));
+    let digest: u256 = jet::policy_approval_hash();
+    let signatures: [Option<Signature>; 3] = witness::APPROVALS;
+    let [sig1, sig2, sig3]: [Option<Signature>; 3] = signatures;
+    let count1: u8 = checksig_add(0, pk1, digest, sig1);
+    let count2: u8 = checksig_add(count1, pk2, digest, sig2);
+    let count3: u8 = checksig_add(count2, pk3, digest, sig3);
+    assert!(jet::le_8(2, count3));
+}
