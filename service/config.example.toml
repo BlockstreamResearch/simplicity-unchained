@@ -3,5 +3,4 @@ port = 30431
 # Required: provision a unique 32-byte secp256k1 private key as 64 hex characters.
 # This deliberately empty example cannot start the signer.
 private_key = ""
-elements_network = "liquidtestnet"
 bitcoin_network = "testnet4"

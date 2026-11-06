@@ -1,13 +1,12 @@
 mod cli;
 mod config;
 mod handlers;
-mod validation;
 mod work;
 
 use cli::{Cli, Commands};
 use config::Config;
 
-use simplicity_unchained_core::{BitcoinNetwork, ElementsNetwork};
+use simplicity_unchained_core::BitcoinNetwork;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
@@ -43,18 +42,16 @@ async fn start(config_path: PathBuf) -> Result<(), String> {
     let config =
         Config::from_file(config_path).map_err(|e| format!("Failed to load config: {}", e))?;
 
-    let elements_network = ElementsNetwork::from_str(&config.service.elements_network)
-        .map_err(|e| format!("Failed to parse Elements network: {}", e))?;
-
     let bitcoin_network = BitcoinNetwork::from_str(&config.service.bitcoin_network)
         .map_err(|e| format!("Failed to parse Bitcoin network: {}", e))?;
 
-    let signer_state = SignerState::new(
-        &config.service.private_key,
-        elements_network,
-        bitcoin_network,
-    )
-    .map_err(|e| format!("Failed to initialize signer state: {}", e))?;
+    let mut signer_state = SignerState::new(&config.service.private_key, bitcoin_network)
+        .map_err(|e| format!("Failed to initialize signer state: {}", e))?;
+    signer_state.liquid_network = config
+        .service
+        .liquid_network
+        .parse()
+        .map_err(|e| format!("Failed to parse Liquid policy network: {e}"))?;
 
     let app = Router::new().merge(handlers::routes(signer_state));
 

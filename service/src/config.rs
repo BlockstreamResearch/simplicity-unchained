@@ -18,8 +18,13 @@ pub struct Config {
 pub struct ServiceConfig {
     pub port: u16,
     pub private_key: String,
-    pub elements_network: String,
     pub bitcoin_network: String,
+    #[serde(default = "default_liquid_network")]
+    pub liquid_network: String,
+}
+
+fn default_liquid_network() -> String {
+    "liquidtestnet".into()
 }
 
 impl Config {

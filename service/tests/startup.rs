@@ -69,7 +69,7 @@ impl Drop for ServiceProcess {
 fn configuration(key: &str, port: u16) -> String {
     format!(
         "[service]\nport = {port}\nprivate_key = \"{key}\"\n\
-         elements_network = \"liquidtestnet\"\nbitcoin_network = \"testnet4\"\n"
+         bitcoin_network = \"testnet4\"\n"
     )
 }
 
@@ -79,9 +79,13 @@ fn write_configuration(directory: &Path, contents: &str) -> NamedTempFile {
     file
 }
 
+fn test_directory() -> TempDir {
+    TempDir::new_in(std::env::current_dir().unwrap()).unwrap()
+}
+
 #[test]
 fn missing_configuration_exits_unsuccessfully() {
-    let directory = TempDir::new().unwrap();
+    let directory = test_directory();
     ServiceProcess::spawn(directory.path(), None).assert_failure("Failed to load config");
     ServiceProcess::spawn(
         directory.path(),
@@ -94,7 +98,7 @@ fn missing_configuration_exits_unsuccessfully() {
 
 #[test]
 fn missing_empty_and_invalid_keys_fail_closed() {
-    let directory = TempDir::new().unwrap();
+    let directory = test_directory();
     for (key, error) in [
         ("".to_string(), "Invalid private key"),
         ("not-hex".to_string(), "Invalid private key hex"),
@@ -106,7 +110,7 @@ fn missing_empty_and_invalid_keys_fail_closed() {
     }
     let file = write_configuration(
         directory.path(),
-        "[service]\nport = 0\nelements_network = \"liquidtestnet\"\nbitcoin_network = \"testnet4\"\n",
+        "[service]\nport = 0\nbitcoin_network = \"testnet4\"\n",
     );
     ServiceProcess::spawn(directory.path(), Some(file.path()))
         .assert_failure("failed to parse config");
@@ -114,7 +118,7 @@ fn missing_empty_and_invalid_keys_fail_closed() {
 
 #[test]
 fn malformed_configuration_does_not_log_private_key_contents() {
-    let directory = TempDir::new().unwrap();
+    let directory = test_directory();
     let marker = "must-not-appear-in-logs";
     let file = write_configuration(
         directory.path(),
@@ -129,25 +133,33 @@ fn malformed_configuration_does_not_log_private_key_contents() {
 }
 
 #[test]
-fn invalid_networks_exit_unsuccessfully() {
-    let directory = TempDir::new().unwrap();
+fn invalid_bitcoin_network_exits_unsuccessfully() {
+    let directory = test_directory();
     let (secret_key, _) = generate_keypair();
     let config = configuration(&hex::encode(secret_key.secret_bytes()), 0);
-    for (network, error) in [
-        ("liquidtestnet", "Failed to parse Elements network"),
-        ("testnet4", "Failed to parse Bitcoin network"),
-    ] {
-        let file = write_configuration(
-            directory.path(),
-            &config.replace(network, "invalid-network"),
-        );
-        ServiceProcess::spawn(directory.path(), Some(file.path())).assert_failure(error);
-    }
+    let file = write_configuration(
+        directory.path(),
+        &config.replace("testnet4", "invalid-network"),
+    );
+    ServiceProcess::spawn(directory.path(), Some(file.path()))
+        .assert_failure("Failed to parse Bitcoin network");
+}
+
+#[test]
+fn legacy_elements_field_cannot_replace_explicit_bitcoin_network() {
+    let directory = test_directory();
+    let config = format!(
+        "{}elements_network = \"liquidtestnet\"\n",
+        configuration(&hex::encode([0xcd; 32]), 0).replace("bitcoin_network = \"testnet4\"\n", ""),
+    );
+    let file = write_configuration(directory.path(), &config);
+    ServiceProcess::spawn(directory.path(), Some(file.path()))
+        .assert_failure("failed to parse config");
 }
 
 #[test]
 fn occupied_port_exits_unsuccessfully() {
-    let directory = TempDir::new().unwrap();
+    let directory = test_directory();
     let listener = TcpListener::bind("0.0.0.0:0").unwrap();
     let (secret_key, _) = generate_keypair();
     let file = write_configuration(
@@ -162,13 +174,16 @@ fn occupied_port_exits_unsuccessfully() {
 
 #[test]
 fn explicit_read_only_configuration_starts_and_serves_requests() {
-    let directory = TempDir::new().unwrap();
+    let directory = test_directory();
     let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = reservation.local_addr().unwrap();
     let (secret_key, _) = generate_keypair();
     let file = write_configuration(
         directory.path(),
-        &configuration(&hex::encode(secret_key.secret_bytes()), address.port()),
+        &format!(
+            "{}elements_network = \"liquidtestnet\"\n",
+            configuration(&hex::encode(secret_key.secret_bytes()), address.port()),
+        ),
     );
     let mut permissions = fs::metadata(file.path()).unwrap().permissions();
     permissions.set_readonly(true);
@@ -203,7 +218,7 @@ fn explicit_read_only_configuration_starts_and_serves_requests() {
 fn shipped_example_has_no_usable_key() {
     let example: toml::Value = toml::from_str(include_str!("../config.example.toml")).unwrap();
     assert_eq!(example["service"]["private_key"].as_str(), Some(""));
-    let directory = TempDir::new().unwrap();
+    let directory = test_directory();
     let file = write_configuration(directory.path(), include_str!("../config.example.toml"));
     ServiceProcess::spawn(directory.path(), Some(file.path()))
         .assert_failure("Invalid private key");
