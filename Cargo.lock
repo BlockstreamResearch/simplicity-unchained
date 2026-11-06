@@ -364,6 +364,7 @@ dependencies = [
  "jet_plugin_abi",
  "script_jets",
  "simplicity-lang",
+ "simplicity-unchained-policy",
  "thiserror",
 ]
 
