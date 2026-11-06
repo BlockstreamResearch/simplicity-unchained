@@ -18,6 +18,7 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 # Copy all workspace members (required by Cargo workspace)
 COPY cli ./cli
 COPY core ./core
+COPY policy ./policy
 COPY service/Cargo.toml ./service/Cargo.toml
 COPY service/src ./service/src
 COPY jet_plugin_abi ./jet_plugin_abi

@@ -4,7 +4,9 @@ use simplicity::bitcoin::NetworkKind;
 use simplicity::elements::BlockHash;
 
 pub mod jets;
+pub mod liquid_policy;
 pub mod plugin;
+pub mod policy;
 pub mod program;
 pub mod runner;
 pub mod utils;

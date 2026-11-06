@@ -14,15 +14,12 @@
    through the host's own implementation; custom jets are called through the function
    pointers from the descriptor.
 
-## Bitcoin transaction context
+## Policy integration
 
-Bitcoin plugin environments now contain the consensus-serialized unsigned
-transaction and the actual selected input index rather than empty transaction
-bytes and index zero. Elements behavior and the `JetEnv` ABI layout are unchanged.
+Native plugins are loaded by a Rust host, not by the policy service endpoints.
+`bitcoin-policy-v1` and `liquid-policy-v1` use fixed portable registries. Adding a
+jet to a policy profile requires a versioned registry and matching compiler, VM,
+service and WASM implementations.
 
-The Bitcoin base set adds `tx_approval_hash` (`ONE -> 2^256`, code `1111111`).
-Existing base jet encodings, CMRs and indices are unchanged. Plugin descriptors
-must not use this newly reserved encoding or a conflicting prefix; the loader
-rejects such conflicts. See the core
-[approval-hash protocol](../../README.md#bitcoin-per-spend-approvals) for its
-semantics and the distinction from a Taproot signing sighash.
+See the [script_jets example](../../../plugin_tests/script_jets/src/lib.rs) for
+a plugin implementation and the [loader test](tests.rs) for host setup.

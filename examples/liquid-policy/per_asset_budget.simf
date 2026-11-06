@@ -1,0 +1,17 @@
+// Liquid Testnet policy asset. Jet constants use raw bytes, not explorer asset-ID order.
+// This second illustrative asset is not a claim that the asset exists on-chain.
+fn main() {
+    let policy_asset: u256 = 0x499a818545f6bae39fc03b637f2a4e1e64e590cac1bc3a6f6d71aa4443654c14;
+    let second_asset: u256 = 0x5151515151515151515151515151515151515151515151515151515151515151;
+    assert!(jet::eq_256(jet::fee_asset(), policy_asset));
+    let current: u256 = jet::current_asset();
+    match jet::eq_256(current, policy_asset) {
+        true => (),
+        false => assert!(jet::eq_256(current, second_asset)),
+    };
+    // The fee denomination does not change when a different asset's input is selected.
+    assert!(jet::le_64(jet::tx_fee(), 1000));
+    // Both budgets bind explicit assets, independent of the selected input.
+    assert!(jet::le_64(jet::asset_current_script_debit(policy_asset), 21000));
+    assert!(jet::le_64(jet::asset_current_script_debit(second_asset), 15000));
+}

@@ -6,9 +6,10 @@ Contributions of all kinds are welcome — bug reports, documentation improvemen
 
 The workspace is organised into focused crates. Keep changes scoped to the appropriate crate and discuss cross-crate changes in an issue first.
 
-- [`core`](core/README.md): Simplicity execution engine and Bitcoin/Elements environments.
-- [`service`](service/README.md): Axum HTTP service exposing the sign/PSBT, sign/PSET, and key-tweak endpoints.
-- [`cli`](cli/README.md): `clap`-based CLI for interacting with the service and accessing ecosystem utilities.
+- [`policy`](policy/README.md): Portable `bitcoin-policy-v1` registry and verified context.
+- [`core`](core/README.md): Policy execution adapter and shared Bitcoin/Elements primitives.
+- [`service`](service/README.md): Axum HTTP service exposing separate Bitcoin/Liquid policy APIs and the version endpoint.
+- [`cli`](cli/README.md): Primary `policy` workflow and key generation.
 
 ## Issues
 
@@ -47,14 +48,13 @@ The service reads `config.toml` from the current directory by default. You can p
 cargo run --quiet -- start --config path/to/your/config.toml
 ```
 
-To exercise CLI commands against the running service, use the demo scripts:
+To exercise the policy CLI against a matching Testnet4 service, follow the
+[demo's artifact requirements](cli/README.md#demo):
 
 ```bash
-# Bitcoin regtest demo
-cd cli && ./scripts/demo_btc.sh
-
-# Elements / Liquid testnet demo
-cd cli && ./scripts/demo_elements.sh
+./cli/scripts/demo_btc.sh --help
+# With reviewed policy artifacts configured:
+./cli/scripts/demo_btc.sh review
 ```
 
 ## Docker

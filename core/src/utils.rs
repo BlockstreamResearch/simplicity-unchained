@@ -417,6 +417,76 @@ mod tests {
     }
 
     #[test]
+    fn legacy_tweak_and_address_golden_vector() {
+        use bitcoin::hashes::Hash;
+        use bitcoin::key::TapTweak;
+        use bitcoin::taproot::{LeafVersion, TapLeafHash, TapNodeHash};
+
+        // Independently calculated with SHA256 and secp256k1 point arithmetic.
+        let secp = bitcoin::secp256k1::Secp256k1::verification_only();
+        let base = bitcoin::XOnlyPublicKey::from_str(
+            "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        )
+        .unwrap();
+        let user = bitcoin::XOnlyPublicKey::from_str(
+            "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+        )
+        .unwrap();
+        let mut script = vec![0x52, 0x21, 0x02];
+        script.extend_from_slice(&[2; 32]);
+        let commitment = signing_commitment(Cmr::from_byte_array([1; 32]), &script);
+        assert_eq!(
+            hex::encode(commitment),
+            "d1eeca3675cdeeb910edb4644dc13ffba0b2d8f1ee9c10133ea724f089994f57",
+        );
+        let (service, _) = base.tap_tweak(&secp, Some(TapNodeHash::from_byte_array(commitment)));
+        assert_eq!(
+            hex::encode(service.serialize()),
+            "c38d3764be1552da4b3a4a9e2fa2bb5334b1e95e2693d3200e300f85e6432c7d",
+        );
+        let full = |key| {
+            bitcoin::PublicKey::new(bitcoin::secp256k1::PublicKey::from_x_only_public_key(
+                key,
+                bitcoin::secp256k1::Parity::Even,
+            ))
+        };
+        let service = full(service.to_x_only_public_key());
+        let user = full(user);
+        let leaf = p2tr_multisig_leaf_btc(&service, &user);
+        assert_eq!(
+            hex::encode(TapLeafHash::from_script(&leaf, LeafVersion::TapScript).to_byte_array()),
+            "b6c4db550a7e7aaccc121cb65c72c68af7c959775644991cdce8c862cbe9e285",
+        );
+        for (network, expected) in [
+            (
+                bitcoin::Network::Testnet,
+                "tb1plkhkj9m23n9aqdme05a0257egx3ktlgnxlpmg0u8xvu07amq2jvsy3yfy7",
+            ),
+            (
+                bitcoin::Network::Bitcoin,
+                "bc1plkhkj9m23n9aqdme05a0257egx3ktlgnxlpmg0u8xvu07amq2jvsnejx73",
+            ),
+        ] {
+            let (address, spend) = generate_p2tr_address_btc(
+                &service,
+                &user,
+                TapNodeHash::from_byte_array([3; 32]),
+                network,
+            )
+            .unwrap();
+            assert_eq!(address.to_string(), expected);
+            assert_eq!(
+                hex::encode(spend.merkle_root().unwrap().to_byte_array()),
+                "78d9fdaea0b27a14cbe0934f75790861efef3f584ca0319da635f67c31f9ee0a",
+            );
+            assert_eq!(
+                hex::encode(address.script_pubkey().as_bytes()),
+                "5120fdaf69176a8ccbd037797d3af553d941a365fd1337c3b43f873338ff77605499",
+            );
+        }
+    }
+
+    #[test]
     fn test_generate_keypair() {
         let (secret_key, public_key) = generate_keypair();
 

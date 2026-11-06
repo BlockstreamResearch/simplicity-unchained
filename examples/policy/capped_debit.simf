@@ -1,0 +1,36 @@
+// All-input accounting, not an output-0 or per-input cap. Values are satoshis.
+fn approved_recipient(script_hash: u256) {
+    let recipient_a: u256 = 0x82d2c7b9ded542f3024bfe1babe73021e1a4894db8b8be6215f96be6737c975b;
+    let recipient_b: u256 = 0x0a22f58e8e4eb93ec82d86a4f4a9d2be3a172665648449f5e9a6747caaf12ca1;
+    match jet::eq_256(script_hash, jet::current_script_hash()) {
+        true => (),
+        false => match jet::eq_256(script_hash, recipient_a) {
+            true => (),
+            false => assert!(jet::eq_256(script_hash, recipient_b)),
+        },
+    }
+}
+
+fn inspect_output(index: u32, count: u32) {
+    match jet::lt_32(index, count) {
+        true => approved_recipient(unwrap(jet::output_script_hash(index))),
+        false => (),
+    }
+}
+
+fn main() {
+    let count: u32 = jet::num_outputs();
+    assert!(jet::le_32(1, count));
+    assert!(jet::le_32(count, 8));
+    inspect_output(0, count);
+    inspect_output(1, count);
+    inspect_output(2, count);
+    inspect_output(3, count);
+    inspect_output(4, count);
+    inspect_output(5, count);
+    inspect_output(6, count);
+    inspect_output(7, count);
+    // J33 includes fees and every input sharing the exact cooperative script.
+    assert!(jet::le_64(jet::current_script_debit(), 100000));
+    assert!(jet::le_64(jet::tx_fee(), 2000));
+}

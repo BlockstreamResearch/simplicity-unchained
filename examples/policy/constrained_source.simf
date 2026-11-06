@@ -1,0 +1,69 @@
+// Independent source/locktime/script-shape example, not a recipient authorization.
+fn source_digest(txid: u256, vout: u32) -> u256 {
+    // SHA256("SimplicityUnchained/PolicySourceOutpoint/v1"), used as a tagged-hash domain.
+    let tag: u256 = 0xfda656e12241387ddfa2bbc530ed2e0e68d26af3cef7b8553b23d9fee33bf0e3;
+    let ctx: Ctx8 = jet::sha_256_ctx_8_init();
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, tag);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, tag);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, jet::signing_commitment_hash());
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_32(ctx, txid);
+    let ctx: Ctx8 = jet::sha_256_ctx_8_add_4(ctx, vout);
+    jet::sha_256_ctx_8_finalize(ctx)
+}
+
+fn inspect_input(index: u32, count: u32, maybe_sig: Option<Signature>) {
+    match jet::lt_32(index, count) {
+        true => {
+            let (txid, vout): (u256, u32) = unwrap(jet::input_prev_outpoint(index));
+            // Replace this publicly known key before funding. Sources need its signature.
+            let source_authority: Pubkey = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
+            jet::bip_0340_verify((source_authority, source_digest(txid, vout)), unwrap(maybe_sig));
+            assert!(jet::lt_32(vout, 8));
+            let blocks: u16 = unwrap(jet::input_lock_blocks(index));
+            assert!(jet::le_16(16, blocks));
+        },
+        false => (),
+    }
+}
+
+fn inspect_output(index: u32, count: u32) {
+    match jet::lt_32(index, count) {
+        true => {
+            // A shape check does NOT authenticate a recipient or prove spendability.
+            assert!(jet::eq_8(unwrap(jet::output_script_class(index)), 5));
+            assert!(jet::eq_32(unwrap(jet::output_script_size(index)), 34));
+            assert!(jet::eq_8(unwrap(jet::output_script_byte(index, 0)), 0x51));
+            assert!(jet::eq_8(unwrap(jet::output_script_byte(index, 1)), 0x20));
+        },
+        false => (),
+    }
+}
+
+fn main() {
+    let inputs: u32 = jet::num_inputs();
+    let outputs: u32 = jet::num_outputs();
+    assert!(jet::le_32(1, inputs));
+    assert!(jet::le_32(inputs, 8));
+    assert!(jet::le_32(1, outputs));
+    assert!(jet::le_32(outputs, 8));
+    let sources: [Option<Signature>; 8] = witness::SOURCES;
+    let [sig0, sig1, sig2, sig3, sig4, sig5, sig6, sig7]: [Option<Signature>; 8] = sources;
+    inspect_input(0, inputs, sig0);
+    inspect_input(1, inputs, sig1);
+    inspect_input(2, inputs, sig2);
+    inspect_input(3, inputs, sig3);
+    inspect_input(4, inputs, sig4);
+    inspect_input(5, inputs, sig5);
+    inspect_input(6, inputs, sig6);
+    inspect_input(7, inputs, sig7);
+    inspect_output(0, outputs);
+    inspect_output(1, outputs);
+    inspect_output(2, outputs);
+    inspect_output(3, outputs);
+    inspect_output(4, outputs);
+    inspect_output(5, outputs);
+    inspect_output(6, outputs);
+    inspect_output(7, outputs);
+    jet::check_csv_blocks(16);
+    jet::check_cltv_height(1000);
+}

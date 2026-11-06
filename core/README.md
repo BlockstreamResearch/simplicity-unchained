@@ -1,114 +1,83 @@
 # Simplicity Unchained Core
 
-Contains the fundamental logic for executing Simplicity programs with Bitcoin and Elements environments.
+Contains the fundamental logic for executing Simplicity policies with Bitcoin and Elements environments.
 
 ## Capabilities
 
-- Execute Simplicity programs with provided data and environment.
-- Utilities for interacting with Elements and Simplicity environments.
-- Custom execution environment extending the Bitcoin and Elements jet sets with additional jets.
+- Execute `bitcoin-policy-v1` policies against verified PSBT context.
+- Execute [`liquid-policy-v1`](../policy/LIQUID.md) policies using the portable VM and proof-verified PSET context.
+- Provide cryptographic, Taproot and transaction-environment utilities.
+- Load [custom jet plugins](src/plugin/README.md) for native callers. The policy profiles use fixed registries.
 
 ## How It Works
 
 ### The Unchained Model
 
-The core idea is to bind a Simplicity program to a co-signer's key using taproot key tweaking, without requiring Simplicity to be a consensus rule on-chain. The oracle commits to a specific program at address-generation time; it can only produce a valid signature if that exact program executes successfully.
+The service commits to a Simplicity policy through its Taproot key tweak, without requiring Simplicity as an on-chain consensus rule.
 
-1. The user writes a Simplicity program encoding the conditions they want enforced (e.g. a signature check, a hash preimage, an oracle assertion).
-2. The service computes the **CMR** (Commitment Merkle Root) of the program — a 32-byte hash that uniquely identifies the program's structure and semantics.
-3. The service commits to both the CMR and the exact script bytes exposed to script-reading jets, then applies the standard taproot tweak: `tweaked_key = tap_tweak(service_key, signing_commitment(CMR, redeem_script))`. This binds the co-signer's key to that program and its script data.
-4. A P2TR address is constructed using the tweaked co-signer key and the user's key (see below). Funds sent to this address can only move with the oracle's cooperation — and the oracle will only cooperate if the Simplicity program passes.
+1. The user writes and compiles a policy for the intended profile, choosing its keys and script data before funding.
+2. The service computes the program's **CMR** (Commitment Merkle Root).
+3. The service derives a cooperative key that commits to the profile fingerprint, network genesis hash, CMR and exact script-data bytes.
+4. The user constructs a P2TR address from that key, their own key and a recovery leaf hash.
+
+Keep the base signing key and published profile available for funded outputs. Enforcement is off-chain: someone holding the signing key can bypass policy evaluation.
 
 ### Taproot Tree Structure
 
-Each P2TR address produced by Simplicity Unchained has the following structure:
-
 ```plaintext
 P2TR output
-├── Internal key: unspendable key
+├── Internal key: standard NUMS (unspendable)
 └── Script tree
     ├── Leaf 0 — Co-signing leaf (2-of-2 multisig)
-    │     <cosigner_tweaked_xonly> OP_CHECKSIG
+    │     <policy_service_xonly> OP_CHECKSIG
     │     <user_xonly> OP_CHECKSIGADD OP_2 OP_EQUAL
-    └── Leaf 1 — User recovery leaf (CSV + user key, hidden from the service)
+    └── Leaf 1 — User recovery leaf (hidden from the service)
 ```
 
-**Internal key**: A provably unspendable key is used as the internal key.
+**Leaf 0 — Co-signing leaf**: Both the service and user must sign. The service key commits to the policy; the service checks that each input spends the reconstructed output before signing.
 
-**Leaf 0 — Co-signing leaf**: A 2-of-2 Schnorr multisig script. Both the co-signer and the user must sign. The co-signer's x-only key embedded here commits to the program and script data, so this leaf is only spendable with signatures from a service that has already executed the matching Simplicity program with the matching script successfully.
-
-**Leaf 1 — User recovery leaf**: A user-controlled script (example is a CSV timelock + user key) that allows the user to recover funds unilaterally after the timelock expires, with no involvement from the service. The service receives only the *hash* of this leaf (`user_leaf_hash`) and never sees the script itself, preserving the user's privacy for the recovery path.
+**Leaf 1 — User recovery leaf**: The user chooses a recovery script, such as a CSV timelock and user key, and keeps the full script privately. The service needs only its hash. A valid recovery spend does not require service cooperation or policy evaluation.
 
 ### Co-signing Flow
 
-When a user wants to spend from the address:
+1. The user prepares a PSBT/PSET with full parent transactions, the committed program and script data, their public key and the recovery hash.
+2. The service verifies parent txids, referenced outputs and `witness_utxo` data, then reconstructs every input's policy-bound output. Liquid also requires verified asset/value disclosures and transaction proofs.
+3. The user reviews the transaction context and obtains any approvals required by the policy.
+4. The service evaluates the witnessed program and, if it passes, returns a cooperative script-path signature for the selected input.
+5. The user verifies the service signature, adds their own signature and finalizes after both signatures are present for every input.
 
-1. The user constructs a PSBT/PSET spending transaction and submits it to the service along with the Simplicity program, the same `redeem_script_hex` used at address generation, any required witness data, their public key, and the user leaf hash.
-2. The service executes the Simplicity program against the transaction environment. Per-spend authorization requires the program to actually verify a transaction-dependent condition; a hash preimage or signature over a fixed message remains reusable.
-3. If execution succeeds, the service re-derives the tweaked co-signer key from the CMR and script, reconstructs the taproot tree (co-signing leaf + hidden user leaf), checks that it matches the input's `witness_utxo.script_pubkey`, computes the script-path sighash for Leaf 0, and returns a Schnorr signature.
-4. The user adds their own signature for the same leaf and finalizes the transaction.
-
-If the Simplicity program fails, the service refuses to sign and the funds remain locked.
+Parent verification proves transaction content, not confirmation or unspentness. Both profiles report `chain_status_verified: false`; check live chain status separately.
 
 ### Bitcoin Per-Spend Approvals
 
-The Bitcoin extension exposes `tx_approval_hash: ONE -> 2^256`. A policy requiring
-an approver's authorization for each spend must verify a BIP-340 signature over
-this digest, not a constant message or a requester-supplied digest:
+The 55 Bitcoin policy jets expose transaction amounts, output scripts, debit including fees, declared locktime conditions and approval hashes:
+
+- J53 `policy_approval_hash` binds the transaction context, selected input and its cooperative sighash.
+- J54 `policy_transaction_approval_hash` permits one approval across all same-contract inputs of the same transaction.
+
+Use [`policy approval-hash`](../cli/README.md#prepare-approve-and-co-sign) to reconstruct the context locally from full parents and a known base service key. Sign the decoded 32-byte digest directly with BIP-340 and compile the signatures into the policy witness. Changing the approved transaction or context requires fresh approvals.
+
+A policy must verify a transaction-dependent condition to authorize individual spends. Static hashlocks and fixed-message signatures are replayable; debit and fee caps apply per transaction, not per day. See the [policy templates](../examples/policy/README.md) and [approval preimages](../policy/README.md#commitments-and-approval-preimages).
+
+### Script Commitment
+
+For Bitcoin, the cooperative key is derived as follows:
 
 ```text
-approval_hash = jet::tx_approval_hash()
-jet::bip_0340_verify((committed_approver_pubkey, approval_hash), witness_signature)
+commitment = TaggedHash("SimplicityUnchained/PolicySigningCommitment/v1",
+    profile_hash || genesis_hash || CMR || SHA256(exact_script_data))
+service_key = BIP341 TapTweak(base_service_key, root = commitment)
 ```
 
-The approver can calculate the exact digest locally using
-`bitcoin_execution_environment` or the CLI's
-[`btc-tx approval-hash`](../cli/README.md#bitcoin-transaction-approvals) command.
-All inputs must have `witness_utxo` populated. The approver must independently
-verify those prevouts and review the transaction before signing the digest.
+The [portable kernel](../policy/README.md) defines the registry, fingerprint, context verification and approval preimages. The [Liquid profile](../policy/LIQUID.md) defines its asset semantics and genesis-bound signing rules.
 
-The version 1 digest is a single SHA256 hash of this concatenation:
+## Execution API
 
-```text
-tag_hash || tag_hash || network_id || input_index_be32 ||
-signing_commitment(CMR, redeem_script) ||
-SHA256(bitcoin_consensus_encode(unsigned_transaction)) ||
-SHA256(bitcoin_consensus_encode(prevouts_vector))
-```
+For Bitcoin, use `policy::policy_cmr` to decode a program without its witness, then `policy::prepare_policy` or `PreparedPolicy::new` to validate the transaction and obtain an immutable `context()` and serializable `summary()`.
 
-`tag_hash = SHA256("SimplicityUnchained/BitcoinApproval/v1")`.
-`network_id` is one byte: `0` for `bitcoin`, `1` for `testnet`, `2` for `testnet4`.
-The input index is four bytes, big-endian. The prevouts vector contains each
-input's `witness_utxo` in transaction order, including its value and script; its
-Bitcoin consensus encoding includes the CompactSize vector length. All hashes
-here are single SHA256, not SHA256d. The program/script commitment is defined
-below.
+The profile accepts version 2, one to eight same-contract inputs and one to eight outputs, with SIGHASH_DEFAULT script-path signing. It rejects duplicate inputs, missing or conflicting parents, overspending and finalized witnesses.
 
-Changing outputs, input outpoints, sequences, amounts, scripts, locktime, version,
-selected input, network, or program/script commitment changes the digest. PSBT
-signatures and other non-transaction metadata are not included. Repeating an
-identical approved transaction is allowed; this is not a one-use-token registry.
-
-This is a dedicated off-chain **approval hash**, not a BIP-341 signing sighash and
-not the Elements `sig_all_hash` jet. The service still produces its cooperative
-Taproot signature over the actual BIP-341 sighash. The dependency's native
-Bitcoin transaction jets are not implemented; programs must use the updated
-`CoreExtension` jet table. The new custom jet uses encoding `1111111` and CMR
-`SHA256("SimplicityUnchained/Jet/tx_approval_hash/v1")`.
-
-**Compatibility:** existing jet encodings, CMRs and static-policy addresses are
-unchanged. Static Bitcoin policies remain intentionally replayable. Adding this
-jet to an existing policy changes its CMR and address; already-funded static
-contracts do not gain per-spend approval automatically. Deploy the new policy
-and migrate funds using an available original spending path.
-
-### Script Commitment and Migration
-
-`signing_commitment` is the 32-byte tagged SHA256 hash
-`SHA256(tag_hash || tag_hash || CMR || SHA256(redeem_script))`, where
-`tag_hash = SHA256("SimplicityUnchained/SigningCommitment/v1")`.
-The original program CMR is unchanged. Omitted, null, and empty scripts all mean
-the same zero-length byte string, which is also committed.
+`evaluate_default(witness)` uses a 10,000,000-milliweight cap. `evaluate(witness, Cost)` and `evaluate_milliweight(witness, u32)` can lower it. Cost is checked before BitMachine allocation and is a static bound, not elapsed time. Errors distinguish decoding, invalid context, policy rejection, execution limits and VM failure. Signing prepares and evaluates again rather than trusting a previous evaluation.
 
 ## Licence
 

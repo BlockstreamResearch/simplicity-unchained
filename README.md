@@ -1,50 +1,50 @@
 # Simplicity Unchained (Prototype Phase)
 
-Simplicity Unchained brings [Simplicity](https://simplicity-lang.org/) to Bitcoin networks. It acts as an oracle that executes Simplicity programs and, on success, produces side effects such as co-signing Bitcoin transactions, triggering events, or performing any other action a server is capable of.
+Simplicity Unchained brings [Simplicity](https://simplicity-lang.org/) to Bitcoin networks. It acts as an off-chain oracle that executes a committed Simplicity policy and, on success, co-signs a transaction.
 
-The primary target is **Bitcoin** (including Bitcoin testnets), with additional support for Elements-based networks such as Liquid.
+The primary target is **Bitcoin**, using `bitcoin-policy-v1`, with confidential multi-asset support for Liquid through `liquid-policy-v1`. The CLI and demo default to Bitcoin Testnet4 and Liquid Testnet.
 
 > ⚠️ **Warning: Project Under Development**
 >
-> This project is still in active development and conceptualization. It is **not safe for use in production environments** at this time. Features and functionality may change, and there may be critical bugs or incomplete implementations.
+> This project has not been independently audited and is **not safe for use in production environments**.
 
 ## How It Works
 
-See [core/README.md](core/README.md) for a detailed explanation of the unchained model, the taproot tree structure, and the co-signing flow.
+See [core/README.md](core/README.md) for the unchained model, Taproot tree structure and policy co-signing flow.
 
 ## Project Structure
 
-- [`core`](core/README.md): Contains the fundamental logic for executing Simplicity programs and interacting with Bitcoin and Elements environments. (Note: In the future, parts of this logic may be migrated to [hal-simplicity](https://github.com/BlockstreamResearch/hal-simplicity))
+- [`core`](core/README.md): Executes Simplicity policies and provides cryptographic, Taproot and transaction-environment utilities.
 
-- [`service`](service/README.md): Implements a web service providing endpoints to interact with Simplicity Unchained. Currently, it supports a 2-of-2 multisig co-signing flow on Bitcoin and Elements, triggered by the successful execution of a Simplicity program.
+- [`service`](service/README.md): Web service for policy-bound key derivation, transaction preparation, evaluation and co-signing.
 
-- [`cli`](cli/README.md): Command-line interface for communicating with the Simplicity Unchained service and accessing various ecosystem utilities. (Note: In the future, parts of this CLI will use [hal-simplicity](https://github.com/BlockstreamResearch/hal-simplicity))
+- [`cli`](cli/README.md): Command-line policy workflows and key generation.
 
-Each component of the project has its own README file with more detailed information.
+- [`policy`](policy/README.md): Portable Bitcoin and Liquid policy kernels and registries, shared by native clients and the browser/WASM implementation.
+
+Each component has its own README with more detailed information.
 
 ## Web Demo
 
-A live testnet demo is hosted at **[testnet.simplicity-unchained.blockstream.com](https://testnet.simplicity-unchained.blockstream.com/)**. It provides a browser interface for writing Simplicity programs, compiling them, generating a P2TR address, and sending co-signed transactions on Bitcoin Testnet4 or Liquid Testnet — no CLI or local setup required.
-
-![Simplicity Unchained Web Demo](doc/demo_website.png)
+The [web demo](https://github.com/BlockstreamResearch/simplicity-unchained-web-demo) provides a browser interface for writing SimplicityHL policies, compiling them, deriving funding addresses and co-signing transactions on Bitcoin Testnet4 or Liquid Testnet. It opens on a landing page, with the interactive workflow at `/demo`.
 
 ## Capabilities demoed so far
 
 ### Bitcoin
 
-You can explore the Bitcoin capabilities by running the [Bitcoin demo script](cli/scripts/demo_btc.sh). This demo guides you through:
+The [Bitcoin demo script](cli/scripts/demo_btc.sh) uses `bitcoin-policy-v1` on Bitcoin Testnet4:
 
-1. Tweaking a public key with a Simplicity program via the Simplicity Unchained service.
-2. Creating a 2-of-2 multisig P2TR address on Bitcoin regtest.
-3. Funding the address and creating a PSBT spending transaction.
-4. Using the Simplicity Unchained service to co-sign the PSBT after successful Simplicity program execution.
-5. Broadcasting the fully signed transaction to Bitcoin regtest.
+1. Check the service's profile, network and known signing key.
+2. Derive a policy-bound P2TR address before funding.
+3. Prepare and review a PSBT using full parent transactions.
+4. Evaluate the policy with its witness and request the service signature.
+5. Add the user's signature and finalize locally.
+
+See the [CLI readme](cli/README.md#demo) for setup and the [policy examples](examples/policy/README.md) for recipient restrictions, debit and fee caps, and transaction approvals.
 
 ### Elements / Liquid
 
-The [Elements demo script](cli/scripts/demo_elements.sh) demonstrates the same 2-of-2 multisig co-signing flow on the Liquid Testnet.
-
-To run either demo, follow the instructions in the [CLI readme](cli/README.md).
+The [`liquid-policy` CLI](cli/README.md#liquid-policy-workflow) supports confidential PSETs and multiple assets. It verifies asset/value disclosure proofs and per-asset accounting before evaluation and signing. See the [Liquid profile](policy/LIQUID.md) for schemas and asset semantics.
 
 ## Licence
 
