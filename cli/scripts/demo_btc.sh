@@ -1,155 +1,105 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+usage() {
+  cat <<'EOF'
+Bitcoin policy-v1 demo (experimental; Bitcoin Testnet4 by default)
+Usage: ./cli/scripts/demo_btc.sh [address|review|sign|--help]
 
-echo "==== Spend type: P2TR ===="
-echo
+Required environment:
+  POLICY_PROGRAM_BASE64       Reviewed bitcoin-policy-v1 program, not legacy bytes
+  BASE_SERVICE_PUBLIC_KEY_HEX Independently known untweaked service key
+  USER_PUBLIC_KEY_HEX         Cooperative user public key
+  RECOVERY_LEAF_HASH_HEX      Exact raw recovery TapNodeHash
+  PSBT_HEX                   Required for review/sign; one input, full parents
+  APPROVAL_WITNESS_BASE64     Required for review/sign; set '' if witness-free
+  USER_SECRET_KEY_FILE        Required for sign; private file of user key hex
 
-BTC="bitcoin-cli -regtest"
-PROGRAM="zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA"
-SIMPLICITY_WITNESS=""
-NETWORK="regtest"
-CSV_BLOCKS=10
+Optional:
+  SERVICE_ORIGIN             Default http://127.0.0.1:30431
+  NETWORK                    Default testnet4; must exactly match the service
+  REDEEM_SCRIPT_HEX          Default empty; exact committed script-data bytes
+  ESPLORA_URL                Explicit parent resolver; default strictly offline
 
-echo "==== Sanity checks ===="
-if ! command -v bitcoin-cli &> /dev/null; then
-  echo "ERROR: bitcoin-cli not found in PATH"
-  exit 1
+address verifies capabilities/tweak before deriving funding data.
+review (default) prepares/evaluates only; it never requests a signature.
+sign revalidates a pre-reviewed PSBT/witness, co-signs and finalizes locally.
+No faucet, broadcast, recovery spend, legacy endpoint or automatic signing retry.
+For multi-input spends use the policy CLI directly.
+EOF
+}
+
+mode="${1:-review}"
+case "$mode" in
+  -h|--help|help) usage; exit 0 ;;
+  address|review|sign) ;;
+  *) usage >&2; exit 2 ;;
+esac
+if [[ $# -gt 1 ]]; then
+  usage >&2
+  exit 2
 fi
 
-if ! $BTC getblockchaininfo > /dev/null 2>&1; then
-  echo "ERROR: bitcoind is not running or not reachable."
-  echo "Start it with:"
-  echo "  bitcoind -regtest -fallbackfee=0.0002 -txindex=1 -daemon"
-  echo "  bitcoin-cli -regtest loadwallet <wallet>"
-  exit 1
+command -v cargo >/dev/null
+command -v jq >/dev/null
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+su=(cargo run --quiet --locked -p cli -- policy)
+service="${SERVICE_ORIGIN:-http://127.0.0.1:30431}"
+network="${NETWORK:-testnet4}"
+: "${POLICY_PROGRAM_BASE64:?Set a reviewed policy-profile program}"
+: "${BASE_SERVICE_PUBLIC_KEY_HEX:?Pin the known untweaked service key}"
+: "${USER_PUBLIC_KEY_HEX:?Set the cooperative user key}"
+: "${RECOVERY_LEAF_HASH_HEX:?Set the committed raw recovery hash}"
+
+policy_args=(
+  --network "$network" --program "$POLICY_PROGRAM_BASE64"
+  --redeem-script-hex "${REDEEM_SCRIPT_HEX:-}"
+)
+binding_args=(
+  "${policy_args[@]}"
+  --base-public-key "$BASE_SERVICE_PUBLIC_KEY_HEX"
+  --user-pubkey "$USER_PUBLIC_KEY_HEX"
+  --user-leaf-hash-hex "$RECOVERY_LEAF_HASH_HEX"
+)
+
+if [[ "$mode" == address ]]; then
+  "${su[@]}" capabilities --network "$network" --service "$service" >&2
+  "${su[@]}" tweak "${policy_args[@]}" \
+    --base-public-key "$BASE_SERVICE_PUBLIC_KEY_HEX" --service "$service" >&2
+  "${su[@]}" address "${binding_args[@]}"
+  exit 0
 fi
 
-echo "OK — bitcoind running"
-echo
-
-echo "==== Setup: Ensure wallet has funds ===="
-MINER_ADDR=$($BTC getnewaddress)
-BAL=$($BTC getbalance)
-if (( $(echo "$BAL < 1.0" | bc -l) )); then
-  echo "Mining initial coins..."
-  $BTC generatetoaddress 101 "$MINER_ADDR" > /dev/null
+: "${PSBT_HEX:?Supply an already constructed, pre-reviewed policy PSBT}"
+if [[ ! ${APPROVAL_WITNESS_BASE64+x} ]]; then
+  echo "Set APPROVAL_WITNESS_BASE64 explicitly (empty only for witness-free policies)" >&2
+  exit 2
 fi
-echo "Wallet balance: $($BTC getbalance) BTC"
-echo
-
-echo "==== Step 0: Get Tweaked Cosigner Public Key ===="
-TWEAK_RESPONSE=$(curl -s -X POST http://localhost:30431/simplicity-unchained/tweak \
-  -H "Content-Type: application/json" \
-  -d "$(jq -n --arg program "$PROGRAM" '{program: $program, jet_env: "bitcoin"}')")
-
-COSIGNER_PUBKEY=$(echo "$TWEAK_RESPONSE" | jq -r '.tweaked_public_key_hex')
-if [ -z "$COSIGNER_PUBKEY" ] || [ "$COSIGNER_PUBKEY" = "null" ]; then
-  echo "ERROR: Failed to get tweaked public key"
-  echo "Response: $TWEAK_RESPONSE"
-  exit 1
+resolver=(--offline)
+if [[ -n "${ESPLORA_URL:-}" ]]; then
+  resolver=(--esplora-url "$ESPLORA_URL")
 fi
-echo "Cosigner pubkey: $COSIGNER_PUBKEY"
-echo
-
-echo "==== Step 1: Generate User Keypair ===="
-USER_KEYPAIR=$(cargo run --quiet -- keypair generate)
-USER_SECKEY=$(echo "$USER_KEYPAIR" | jq -r '.secret_key')
-USER_PUBKEY=$(echo "$USER_KEYPAIR" | jq -r '.public_key')
-echo "User public key: $USER_PUBKEY"
-echo
-
-echo "==== Step 2: Build User Leaf (CSV recovery) ===="
-cargo run --quiet -- btc-tx build-csv-leaf --user-pubkey "$USER_PUBKEY" --timelock "$CSV_BLOCKS"
-LEAF_DATA=$(cargo run --quiet -- btc-tx build-csv-leaf \
-  --user-pubkey "$USER_PUBKEY" \
-  --timelock "$CSV_BLOCKS")
-USER_LEAF_HASH=$(echo "$LEAF_DATA" | jq -r '.leaf_hash')
-echo "User leaf hash:   $USER_LEAF_HASH"
-echo
-
-echo "==== Step 3: Create P2TR Address ===="
-ADDRESS_DATA=$(cargo run --quiet -- address multisig \
-  --pubkey1 "$COSIGNER_PUBKEY" \
-  --pubkey2 "$USER_PUBKEY" \
-  --user-leaf-hash "$USER_LEAF_HASH" \
-  --network "$NETWORK")
-
-ADDRESS=$(echo "$ADDRESS_DATA" | jq -r '.address')
-if [ -z "$ADDRESS" ] || [ "$ADDRESS" = "null" ]; then
-  echo "ERROR: Failed to generate address"
-  echo "Response: $ADDRESS_DATA"
-  exit 1
+tx_args=("${binding_args[@]}" --psbt "$PSBT_HEX" --input-index 0 "${resolver[@]}")
+prepared=$("${su[@]}" prepare "${tx_args[@]}" --service "$service")
+echo "$prepared" >&2
+if [[ "$(jq -er '.context.input_count' <<<"$prepared")" != 1 ]]; then
+  echo "Demo requires exactly one input; use the policy CLI for multiple inputs" >&2
+  exit 2
 fi
-echo "Address: $ADDRESS"
-echo
-
-echo "==== Step 4: Fund Address ===="
-FUNDING_TXID=$($BTC sendtoaddress "$ADDRESS" 0.001)
-$BTC generatetoaddress 1 "$MINER_ADDR" > /dev/null
-echo "Funding txid: $FUNDING_TXID (confirmed)"
-VOUT=$($BTC gettransaction "$FUNDING_TXID" | jq '.details[0].vout')
-echo "Output index: $VOUT"
-echo
-
-echo "==== Step 5: Create PSBT ===="
-PSBT_CREATE_DATA=$(cargo run --quiet -- btc-tx create \
-  -i "$FUNDING_TXID:$VOUT" \
-  -o "$ADDRESS:90000" \
-  --network "$NETWORK")
-PSBT_HEX=$(echo "$PSBT_CREATE_DATA" | jq -r '.psbt')
-echo "Created PSBT: $PSBT_HEX"
-echo
-
-echo "==== Step 6: Cosigner Signature (Service) ===="
-SIGN_REQUEST=$(jq -n \
-  --arg psbt "$PSBT_HEX" \
-  --arg program "$PROGRAM" \
-  --arg witness "$SIMPLICITY_WITNESS" \
-  --arg user_pubkey "$USER_PUBKEY" \
-  --arg user_leaf_hash "$USER_LEAF_HASH" \
-  '{
-    psbt_hex: $psbt,
-    input_index: 0,
-    program: $program,
-    witness: $witness,
-    jet_env: "bitcoin",
-    user_pubkey: $user_pubkey,
-    user_leaf_hash_hex: $user_leaf_hash
-  }')
-
-PSBT_SIGN1_DATA=$(curl -s -X POST http://localhost:30431/simplicity-unchained/sign/psbt \
-  -H "Content-Type: application/json" \
-  -d "$SIGN_REQUEST")
-
-if echo "$PSBT_SIGN1_DATA" | jq -e '.error' > /dev/null 2>&1; then
-  echo "ERROR from sign service: $(echo "$PSBT_SIGN1_DATA" | jq -r '.error')"
-  exit 1
+"${su[@]}" approval-hash "${tx_args[@]}" >&2
+"${su[@]}" evaluate "${tx_args[@]}" --witness "$APPROVAL_WITNESS_BASE64" \
+  --service "$service" >&2
+if [[ "$mode" == review ]]; then
+  echo "$prepared"
+  exit 0
 fi
 
-PSBT_SIGNED1=$(echo "$PSBT_SIGN1_DATA" | jq -r '.psbt_hex')
-echo "Cosigner signature: $(echo "$PSBT_SIGN1_DATA" | jq -r '.signature_hex')"
-echo
-
-echo "==== Step 7: User Signature ===="
-PSBT_SIGN2_DATA=$(cargo run --quiet -- btc-tx sign \
-  --psbt "$PSBT_SIGNED1" \
-  --secret-key "$USER_SECKEY" \
-  --input-index 0 \
-  --cosigner-pubkey "$COSIGNER_PUBKEY" \
-  --user-leaf-hash "$USER_LEAF_HASH")
-
-PSBT_SIGNED2=$(echo "$PSBT_SIGN2_DATA" | jq -r '.psbt')
-echo "User signature added"
-echo
-
-echo "==== Step 8: Finalize ===="
-FINALIZE_DATA=$(cargo run --quiet -- btc-tx finalize --psbt "$PSBT_SIGNED2")
-FINAL_TX_HEX=$(echo "$FINALIZE_DATA" | jq -r '.transaction_hex')
-echo "TXID: $(echo "$FINALIZE_DATA" | jq -r '.txid')"
-echo
-
-echo "==== Step 9: Broadcast ===="
-BROADCAST_TXID=$($BTC sendrawtransaction "$FINAL_TX_HEX")
-$BTC generatetoaddress 1 "$MINER_ADDR" > /dev/null
-echo "Done! TXID: $BROADCAST_TXID"
+: "${USER_SECRET_KEY_FILE:?Provide a private file containing the user secret key hex}"
+signed=$("${su[@]}" sign "${tx_args[@]}" --witness "$APPROVAL_WITNESS_BASE64" \
+  --service "$service")
+psbt=$(jq -er '.psbt_hex' <<<"$signed")
+tx_args=("${binding_args[@]}" --psbt "$psbt" --input-index 0 "${resolver[@]}")
+user_signed=$("${su[@]}" user-sign "${tx_args[@]}" --secret-key-file "$USER_SECRET_KEY_FILE")
+psbt=$(jq -er '.psbt_hex' <<<"$user_signed")
+tx_args=("${binding_args[@]}" --psbt "$psbt" --input-index 0 "${resolver[@]}")
+"${su[@]}" finalize "${tx_args[@]}"
