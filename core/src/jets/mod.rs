@@ -3,6 +3,7 @@ pub mod bitcoin;
 pub mod elements;
 pub mod environments;
 pub mod exec;
+pub mod liquid_policy;
 pub mod policy;
 
 #[cfg(test)]
