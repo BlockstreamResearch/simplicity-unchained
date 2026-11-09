@@ -1,11 +1,19 @@
-use std::sync::Arc;
+use simplicity::elements::script::Script;
+use simplicity::jet::{CoreEnv, ElementsTxEnv};
 
-use hal_simplicity::simplicity::jet::elements::ElementsEnv;
+pub type BitcoinUnchainedEnv = UnchainedEnv<BitcoinTxEnv>;
+pub type ElementsUnchainedEnv = UnchainedEnv<ElementsTxEnv>;
 
-use hal_simplicity::simplicity::elements::{Transaction, script::Script};
-
-pub type BitcoinUnchainedEnv = UnchainedEnv<()>;
-pub type ElementsUnchainedEnv = UnchainedEnv<ElementsEnv<Arc<Transaction>>>;
+/// Transaction context exposed to Bitcoin custom jets and plugins.
+pub struct BitcoinTxEnv {
+    /// Unsigned spending transaction, without PSBT signature metadata.
+    pub tx: simplicity::bitcoin::Transaction,
+    /// Input being authorized.
+    pub input_index: u32,
+    /// Versioned per-spend approval digest, distinct from the Taproot signing sighash.
+    pub approval_hash: [u8; 32],
+    pub(crate) core_env: CoreEnv,
+}
 
 pub struct UnchainedEnv<E> {
     pub redeem_script: Script,

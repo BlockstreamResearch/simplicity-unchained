@@ -1,0 +1,9 @@
+[package]
+name = "jet_plugin_abi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+
+[dependencies]
+# Pinned exactly: plugins and host must link the same version, see `SIMPLICITY_SYS_VERSION`.
+simplicity-sys = "=0.8.0"

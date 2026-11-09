@@ -10,6 +10,12 @@ path = "src/lib.rs"
 
 [dependencies]
 hex-literal = "1.1.0"
-hal-simplicity = { workspace = true }
+simplicity-lang = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
+dlopen2 = "0.8.2"
+jet_plugin_abi = { path = "../jet_plugin_abi" }
+simplicity-unchained-policy = { path = "../policy" }
+
+[dev-dependencies]
+script_jets = { path = "../plugin_tests/script_jets" }

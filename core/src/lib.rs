@@ -1,9 +1,13 @@
 use std::str::FromStr;
 
-use hal_simplicity::simplicity::elements::BlockHash;
-use hal_simplicity::simplicity::elements::hashes::Hash;
+use simplicity::bitcoin::NetworkKind;
+use simplicity::elements::BlockHash;
 
 pub mod jets;
+pub mod liquid_policy;
+pub mod plugin;
+pub mod policy;
+pub mod program;
 pub mod runner;
 pub mod utils;
 
@@ -58,6 +62,15 @@ impl FromStr for BitcoinNetwork {
             "testnet" => Ok(BitcoinNetwork::Testnet),
             "testnet4" => Ok(BitcoinNetwork::Testnet4),
             _ => Err(format!("unknown network: {}", s)),
+        }
+    }
+}
+
+impl From<BitcoinNetwork> for NetworkKind {
+    fn from(value: BitcoinNetwork) -> Self {
+        match value {
+            BitcoinNetwork::Mainnet => Self::Main,
+            BitcoinNetwork::Testnet | BitcoinNetwork::Testnet4 => Self::Test,
         }
     }
 }

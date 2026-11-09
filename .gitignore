@@ -1,3 +1,5 @@
 /target
 /core/target
 *.dev.*
+/config.toml
+/service/config.toml

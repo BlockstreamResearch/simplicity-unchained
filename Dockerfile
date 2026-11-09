@@ -13,15 +13,19 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /build
 
 # Copy workspace manifests
-COPY Cargo.toml rust-toolchain.toml ./
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 
 # Copy all workspace members (required by Cargo workspace)
 COPY cli ./cli
 COPY core ./core
-COPY service ./service
+COPY policy ./policy
+COPY service/Cargo.toml ./service/Cargo.toml
+COPY service/src ./service/src
+COPY jet_plugin_abi ./jet_plugin_abi
+COPY plugin_tests ./plugin_tests
 
 # Build the service in release mode
-RUN cargo build --release --package service
+RUN cargo build --locked --release --package service
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim
@@ -41,20 +45,17 @@ WORKDIR /app
 # Copy the compiled binary from builder
 COPY --from=builder /build/target/release/service /app/service
 
-# Copy the configuration file
-COPY service/config.toml /app/config.toml
-
 # Change ownership to the service user
 RUN chown -R service:service /app
 
 # Switch to non-root user
 USER service
 
-# Expose the service port (default: 8080)
-EXPOSE 8080
+# Expose the example configuration's service port
+EXPOSE 30431
 
 # Set the entrypoint
 ENTRYPOINT ["/app/service"]
 
-# Default command arguments
+# Requires an operator-provided read-only configuration mount
 CMD ["start", "--config", "/app/config.toml"]

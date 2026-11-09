@@ -1,47 +1,83 @@
 # Simplicity Unchained Service
 
-Simplicity Unchained Service is a web service that provides endpoints to interact with the Simplicity Unchained oracle. It currently supports a 2-of-2 multisig side effect triggered by the execution of Simplicity programs.
+Simplicity Unchained Service evaluates committed policies and co-signs Bitcoin and Liquid transactions. It exposes `bitcoin-policy-v1` and `liquid-policy-v1` through separate API paths.
 
 ## Starting the Service
 
-To start the Simplicity Unchained Servic navigate to the `service` directory and run the following command:
+For a new service, provision a configuration with a unique, persistent signing
+key. Reuse the existing private configuration when restarting a funded service.
+
+```bash
+umask 077
+cd service
+cp config.example.toml config.toml
+```
+
+Set `service.private_key` in the local `config.toml` to a newly generated
+32-byte secp256k1 private key (64 hex characters). Use a cryptographically secure
+generator, for example `openssl rand -hex 32`, and edit the file locally without
+putting the key in command-line arguments. Keep the file private and backed up;
+do not commit it or put it in a Docker build context. The example's empty key
+cannot start the service.
+
+Then start the service:
 
 ```bash
 cargo run --quiet -- start
 ```
 
-You can optionally specify a custom configuration file using the `--config` flag:
+You can specify a custom configuration file using `--config`:
 
 ```bash
 cargo run --quiet -- start --config path/to/your/config.toml
 ```
 
-By default, service configuration looks for a `config.toml` file in the current directory.
+By default, the service looks for `config.toml` in the current directory. Invalid
+configuration exits with a nonzero status.
 
 ## Configuration
 
 ```toml
 [service]
 # Port on which the service will run
-port = 8080
-# secpr256k1 32-byte hex-encoded private key, used for signing
-# this is a demo key, do not use it anywhere else
-private_key = "804622cda0d8e634317a12651d91751ceff5c081f2b5f63ef7912725c7275e5d"
-# Network to get metadata from: liquid or liquidtestnet
-elements_network = "liquidtestnet"
-# Bitcoin network for signature computation: bitcoin, testnet, testnet4
+port = 30431
+# Required: provision a unique, persistent 32-byte private key.
+private_key = ""
+# Bitcoin network: bitcoin, testnet, testnet4
 bitcoin_network = "testnet4"
+# Liquid network: liquid or liquidtestnet (default)
+liquid_network = "liquidtestnet"
 ```
+
+`bitcoin_network` is required. `liquid_network` is optional and defaults to
+Liquid Testnet. Requests must match the configured network for their profile.
+
+### Docker
+
+To run the prebuilt release image without compiling, follow
+[Run your own SU service](../README.md#run-your-own-su-service).
+The instructions below build an image from the local checkout.
+
+The image contains the service binary but no active configuration or signing key.
+Provision a configuration outside the build context using the example above,
+then mount it read-only:
+
+```bash
+docker build -t simplicity-unchained-service .
+docker run --rm -p 30431:30431 \
+  --mount type=bind,src=/absolute/path/to/service-config.toml,dst=/app/config.toml,readonly \
+  simplicity-unchained-service
+```
+
+Run these commands from the repository root. The host file must exist and be
+readable by the container's service user (UID/GID 1000), without making the key
+world-readable. Adjust the published port if you change `service.port`.
 
 ## Endpoints
 
-The service exposes the following endpoints:
-
 ### 1. Version Endpoint
 
-`GET /simplicity-unchained/version`: Returns the current version of the service.
-
-**Success Response**:
+`GET /simplicity-unchained/version` returns the service package version:
 
 ```json
 {
@@ -49,132 +85,106 @@ The service exposes the following endpoints:
 }
 ```
 
-### 2. Sign PSBT Endpoint
+### 2. Policy Endpoints
 
-`POST /simplicity-unchained/sign/psbt`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig Bitcoin transaction.
+Bitcoin operations use `/simplicity-unchained/policy/bitcoin`; Liquid operations
+use `/simplicity-unchained/policy/liquid`.
 
-**Request Body**:
+| Method | Path suffix | Operation |
+|---|---|---|
+| GET | `/capabilities` | Return the profile fingerprint, manifest, network, genesis hash, base public key and limits. |
+| POST | `/tweak` | Derive the policy-bound cooperative key before funding. |
+| POST | `/prepare` | Verify transaction evidence and return the context without requiring approval witnesses. |
+| POST | `/evaluate` | Evaluate the witnessed policy without signing. |
+| POST | `/sign` | Prepare and evaluate again, then co-sign the selected input. |
+
+The [CLI](../cli/README.md) checks the service manifest, network and known base
+key, reconstructs the context locally and verifies returned signatures.
+
+**Program binding**
+
+All POST operations require these fields. This example is for Bitcoin:
 
 ```json
 {
-  "psbt_hex": "70736274ff...",
+  "profile_hash": "<compiled manifest fingerprint>",
+  "network": "testnet4",
+  "program": "<standard-base64 bitcoin-policy-v1 program>",
+  "redeem_script_hex": ""
+}
+```
+
+For Liquid, use its fingerprint, compiled program and configured network.
+`redeem_script_hex` is required; `""` commits zero script-data bytes.
+
+`/tweak` returns `profile`, `profile_hash`, `network`, `genesis_hash`, `cmr`,
+`signing_commitment`, `public_key_hex` and `base_public_key_hex`.
+`public_key_hex` is the 32-byte x-only cooperative leaf key, not the Taproot
+internal key. The commitment binds the profile, genesis hash, CMR and script
+data; see the [kernel specification](../policy/README.md).
+
+**Transaction requests**
+
+`prepare`, `evaluate` and `sign` add these fields to the binding:
+
+```json
+{
+  "psbt_hex": "<hex serialized PSBT>",
   "input_index": 0,
-  "redeem_script_hex": "5221...",
-  "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
-  "witness": ""
+  "user_pubkey": "<compressed or x-only public key hex>",
+  "user_leaf_hash_hex": "<32-byte raw recovery leaf hash>",
+  "witness": "<standard-base64 witness>"
 }
 ```
 
-**Request Fields**:
+Liquid uses `pset_hex` instead of `psbt_hex`. `/prepare` does not require
+`witness`; `/evaluate` and `/sign` require it, with `""` for a witness-free
+program. Unknown fields are rejected.
 
-- `psbt_hex`: The PSBT (Partially Signed Bitcoin Transaction) encoded as a hexadecimal string
-- `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation
-- `program`: The Simplicity program to execute for validation before signing
-- `witness`: The witness data required by the Simplicity program (optional, can be an empty string)
+Every input requires a full `non_witness_utxo` parent and matching
+`witness_utxo`. The service verifies parent txids and referenced outputs; it
+does not fetch parents. The Bitcoin CLI can populate missing evidence using an
+explicit Esplora resolver before sending the request.
 
-**Success Response**:
+Both profiles accept version 2, one to eight same-contract P2TR inputs and one
+to eight outputs, with SIGHASH_DEFAULT script-path signing. Duplicates,
+conflicting evidence, invalid accounting and finalized input witnesses are
+rejected. Liquid also verifies asset/value disclosures, range and surjection
+proofs, and commitment balance. See the [Liquid profile](../policy/LIQUID.md) for
+required PSET fields and per-asset rules.
 
-```json
-{
-  "psbt_hex": "70736274ff...",
-  "signature_hex": "3045022100...",
-  "public_key_hex": "02...",
-  "input_index": 0,
-  "partial_sigs_count": 1
-}
-```
+**Responses**
 
-**Error Response**:
+- `/prepare`: `{"context": ...}`.
+- `/evaluate`: `{"accepted":true,"context":...,"execution_cost_milliweight":...}`.
+- `/sign`: `psbt_hex` (or `pset_hex`), `signature_hex`, `public_key_hex`,
+  `input_index`, `context` and `execution_cost_milliweight`.
 
-```json
-{
-  "error": "Validation failed: ..."
-}
-```
+The context includes verified prevouts, output scripts, accounting, the signing
+digest and approval hashes. J53 `policy_approval_hash` binds the selected input;
+J54 `policy_transaction_approval_hash` can approve all same-contract inputs of
+one transaction. Approvers review the context locally and sign decoded 32-byte
+digests directly with BIP-340, without another SHA256.
 
-### 3. Sign PSET Endpoint
+The service does not finalize or broadcast. Add the user's signature with
+`policy user-sign` or `liquid-policy user-sign`, repeat for every input, then
+finalize locally.
 
-`POST /simplicity-unchained/sign/pset`: Accepts a Simplicity program and its inputs, executes it, and if successful, co-signs a 2-of-2 multisig transaction.
-**Request Body**:
+### Limits and Errors
 
-```json
-{
-  "pset_hex": "70736574ff...",
-  "input_index": 0,
-  "redeem_script_hex": "5221...",
-  "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
-  "witness": ""
-}
-```
+Requests are limited to 2 MiB, two concurrent CPU workers, a five-second response
+deadline and 10,000,000 milliweight per evaluation. A timed-out worker retains
+its slot until it exits. Busy requests return 503; timeouts return 504.
 
-**Request Fields**:
+Invalid fields, context, proofs or policy execution return non-success HTTP
+responses. Operation errors contain `error` and `code`; request-decoding
+errors can return framework-generated responses.
 
-- `pset_hex`: The PSET (Partially Signed Elements Transaction) encoded as a hexadecimal string
-- `input_index`: The index of the transaction input to sign (must be between 0 and 65535)
-- `redeem_script_hex`: The redeem script in hexadecimal format, used for SegWit v0 signature computation
-- `program`: The Simplicity program to execute for validation before signing
-- `witness`: The witness data required by the Simplicity program (can be an empty string)
-
-**Success Response**:
-
-```json
-{
-  "pset_hex": "70736574ff...",
-  "signature_hex": "3045022100...",
-  "public_key_hex": "02...",
-  "input_index": 0,
-  "partial_sigs_count": 1
-}
-```
-
-**Error Response**:
-
-```json
-{
-  "error": "Validation failed: ..."
-}
-```
-
-### 4. Tweak Endpoint
-
-`POST /simplicity-unchained/tweak`: Accepts a Simplicity program, computes its CMR (commitment Merkle root), and returns the tweaked public key using taproot key tweaking.
-
-**Request Body**:
-
-```json
-{
-  "program": "zSQIS29W33fvVt9371bfd+9W33fvVt9371bfd+9W33fvVt93hgGA",
-  "jet_env": "elements"
-}
-```
-
-**Request Fields**:
-
-- `program`: The Simplicity program to compute the CMR from (must be a non-empty string)
-- `jet_env`: The jet environment to use, either `elements` or `bitcoin`
-
-**Success Response**:
-
-```json
-{
-  "cmr_hex": "a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1",
-  "tweaked_public_key_hex": "02a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
-}
-```
-
-**Response Fields**:
-
-- `cmr_hex`: The 32-byte commitment Merkle root (CMR) of the program, encoded as a 64-character hexadecimal string
-- `tweaked_public_key_hex`: The 33-byte compressed tweaked public key, encoded as a 66-character hexadecimal string
-
-**Error Response**:
-
-```json
-{
-  "error": "Failed to parse program: ..."
-}
-```
+Parent verification establishes content, not confirmation, chain membership,
+unspentness or maturity. Bitcoin context reports
+`provenance: "parent-txid-verified"`; Liquid provenance also lists the verified
+disclosure and transaction proofs. Both report `chain_status_verified: false`.
+Check live chain status separately.
 
 ## Licence
 

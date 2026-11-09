@@ -1,0 +1,35 @@
+// Experimental bitcoin-policy-v1 only. Replace reviewed literals BEFORE funding.
+fn approved_recipient(script_hash: u256) {
+    // SHA256(0014 || 20 bytes of 0x11), an exact P2WPKH scriptPubKey.
+    let recipient_a: u256 = 0x82d2c7b9ded542f3024bfe1babe73021e1a4894db8b8be6215f96be6737c975b;
+    // SHA256(5120 || x-only 1*G), an exact P2TR scriptPubKey.
+    let recipient_b: u256 = 0x0a22f58e8e4eb93ec82d86a4f4a9d2be3a172665648449f5e9a6747caaf12ca1;
+    match jet::eq_256(script_hash, jet::current_script_hash()) {
+        true => (),
+        false => match jet::eq_256(script_hash, recipient_a) {
+            true => (),
+            false => assert!(jet::eq_256(script_hash, recipient_b)),
+        },
+    }
+}
+
+fn inspect_output(index: u32, count: u32) {
+    match jet::lt_32(index, count) {
+        true => approved_recipient(unwrap(jet::output_script_hash(index))),
+        false => (),
+    }
+}
+
+fn main() {
+    let count: u32 = jet::num_outputs();
+    assert!(jet::le_32(1, count));
+    assert!(jet::le_32(count, 8));
+    inspect_output(0, count);
+    inspect_output(1, count);
+    inspect_output(2, count);
+    inspect_output(3, count);
+    inspect_output(4, count);
+    inspect_output(5, count);
+    inspect_output(6, count);
+    inspect_output(7, count);
+}
