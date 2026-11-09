@@ -12,7 +12,7 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::json;
-use simplicity::elements::secp256k1_zkp::{All, PublicKey, Secp256k1, SecretKey};
+use simplicity::elements::secp256k1_zkp::{All, Secp256k1, SecretKey};
 use simplicity_unchained_core::BitcoinNetwork;
 use tokio::sync::Semaphore;
 
