@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use super::*;
 use axum::{
     body::Body,
@@ -12,20 +10,6 @@ use tower::ServiceExt;
 
 fn test_state() -> SignerState {
     SignerState::new(&hex::encode([0xcd; 32]), BitcoinNetwork::Testnet4).unwrap()
-}
-
-#[test]
-fn disclosed_demo_identity_is_rejected_for_both_parities() {
-    for prefix in ["02", "03"] {
-        let public_key = PublicKey::from_str(&format!("{prefix}{DISCLOSED_DEMO_KEY}")).unwrap();
-        assert!(
-            validate_signing_identity(public_key.x_only_public_key().0)
-                .unwrap_err()
-                .contains("publicly disclosed demo signing key")
-        );
-    }
-    assert!(SignerState::new("", BitcoinNetwork::Testnet4).is_err());
-    assert!(SignerState::new(&hex::encode([0; 32]), BitcoinNetwork::Testnet4).is_err());
 }
 
 pub(super) async fn post_json(

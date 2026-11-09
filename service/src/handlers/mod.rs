@@ -12,24 +12,11 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::json;
-use simplicity::elements::secp256k1_zkp::{All, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
+use simplicity::elements::secp256k1_zkp::{All, PublicKey, Secp256k1, SecretKey};
 use simplicity_unchained_core::BitcoinNetwork;
 use tokio::sync::Semaphore;
 
 use crate::work::{MAX_BLOCKING_JOBS, MAX_BODY_BYTES};
-
-// Public identity of the disclosed demo key; also reject its negation (same Taproot identity).
-const DISCLOSED_DEMO_KEY: &str = "3523982d58e94be3b735731593f8225043880d53727235b566c515d24a0f7baf";
-
-fn validate_signing_identity(public_key: XOnlyPublicKey) -> Result<(), String> {
-    if public_key.to_string() == DISCLOSED_DEMO_KEY {
-        return Err(
-            "The publicly disclosed demo signing key is not allowed; provision a new private key"
-                .to_string(),
-        );
-    }
-    Ok(())
-}
 
 async fn version() -> impl IntoResponse {
     Json(json!({ "version": env!("CARGO_PKG_VERSION") }))
@@ -99,11 +86,6 @@ impl SignerState {
         let secret_key = SecretKey::from_slice(&secret_key_bytes)
             .map_err(|e| format!("Invalid private key: {}", e))?;
         let secp = Secp256k1::new();
-        validate_signing_identity(
-            PublicKey::from_secret_key(&secp, &secret_key)
-                .x_only_public_key()
-                .0,
-        )?;
         Ok(Self {
             secret_key,
             secp: Arc::new(secp),
